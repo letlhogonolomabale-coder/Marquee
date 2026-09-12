@@ -1,0 +1,1668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Marquee — find what's on</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0A0A0C">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0A0A0C;
+    --bg2: #101013;
+    --surface: #151518;
+    --surface-raised: #1D1D21;
+    --line: #2B2B30;
+    --line-soft: #222226;
+    --line-hover: #3D3D44;
+    --amber: #F5D35A;
+    --amber-dim: #8A7530;
+    --magenta: #FF4FA0;
+    --teal: #33E6C8;
+    --teal-dim: #1D6E60;
+    --violet: #8E7CFF;
+    --text: #F0F0F2;
+    --text-soft: #C7C7CC;
+    --muted: #87878F;
+    --danger: #FF5C6C;
+    --ink: #0B0B0D;
+    --chip-text: #F5E7BE;
+    --chip-text-2: #FFD8EA;
+    --bg-rgb: 10,10,12;
+    --surface-rgb: 21,21,24;
+    --amber-rgb: 245,211,90;
+    --magenta-rgb: 255,79,160;
+    --teal-rgb: 51,230,200;
+    --violet-rgb: 142,124,255;
+  }
+
+  *{box-sizing:border-box;}
+  html{transition:background-color 0.4s ease;}
+  html,body{margin:0;padding:0;}
+  body,.topbar,.event,.hero-event,.past-card,.scan-box,.host-hero,.upload-box,.id-preview,
+  .ride-opt,.sheet,#toast-layer .toast,.navtabs,.event-tag,.icon-btn,.status-pill,
+  .hero-event-tag,.trend-badge,.field input,.field select,.field textarea,.scan-row input{
+    transition:background-color 0.35s ease, border-color 0.35s ease, color 0.35s ease, box-shadow 0.35s ease;
+  }
+  body{
+    background:
+      radial-gradient(ellipse 60% 40% at 20% 15%, rgba(var(--magenta-rgb),0.14), transparent 60%),
+      radial-gradient(ellipse 55% 45% at 85% 10%, rgba(var(--violet-rgb),0.13), transparent 60%),
+      radial-gradient(ellipse 60% 50% at 50% 100%, rgba(var(--teal-rgb),0.10), transparent 60%),
+      var(--bg);
+    background-attachment:fixed;
+    transition:background-color 0.4s ease, color 0.4s ease;
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+  }
+  #bg-bubbles{
+    position:fixed;
+    inset:0;
+    overflow:hidden;
+    pointer-events:none;
+    z-index:-1;
+  }
+  ::selection{background:var(--magenta);color:#1A0B18;}
+  a{color:inherit;}
+  button{touch-action:manipulation;}
+
+  /* ============ LANDING ============ */
+  #landing{
+    position:relative;
+    min-height:100vh;
+    min-height:100dvh;
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:48px 22px;
+    overflow-x:hidden;
+    overflow-y:auto;
+    cursor:pointer;
+    background:
+      radial-gradient(ellipse 60% 40% at 20% 15%, rgba(var(--magenta-rgb),0.28), transparent 60%),
+      radial-gradient(ellipse 55% 45% at 85% 10%, rgba(var(--violet-rgb),0.26), transparent 60%),
+      radial-gradient(ellipse 60% 50% at 50% 100%, rgba(var(--teal-rgb),0.18), transparent 60%),
+      var(--bg);
+    transition:opacity 0.45s ease, filter 0.45s ease, transform 0.45s ease, background-color 0.4s ease;
+  }
+  #landing.leaving{opacity:0;transform:scale(1.04);filter:blur(6px);pointer-events:none;}
+  .landing-progress{
+    width:100%;max-width:220px;height:3px;
+    background:var(--line-soft);border-radius:2px;overflow:hidden;
+    margin:22px auto 0;
+  }
+  .landing-progress-fill{
+    height:100%;width:0%;border-radius:2px;
+    background:linear-gradient(100deg, var(--amber), var(--magenta));
+  }
+  .landing-progress-fill.animate{animation:fillbar 5s linear forwards;}
+  @keyframes fillbar{from{width:0%}to{width:100%}}
+  .landing-hint{font-size:12px;color:var(--muted);margin:12px 0 0;}
+  @media (prefers-reduced-motion: reduce){
+    #landing{transition:opacity 0.2s linear;}
+    #landing.leaving{transform:none;filter:none;}
+    .landing-progress-fill.animate{animation:none;width:100%;}
+  }
+  .bokeh{
+    position:absolute;
+    border-radius:50%;
+    filter:blur(2px);
+    opacity:0.55;
+    pointer-events:none;
+    animation:drift 7s ease-in-out infinite;
+  }
+  @keyframes drift{
+    0%,100%{transform:translateY(0);}
+    50%{transform:translateY(-16px);}
+  }
+  .landing-inner{position:relative;z-index:2;max-width:480px;}
+  .logo-mark{width:78px;height:78px;margin:0 auto 22px;display:block;}
+  #landing h1{
+    font-family:'Fraunces',serif;
+    font-weight:700;
+    font-size:clamp(40px,9vw,58px);
+    letter-spacing:-0.02em;
+    margin:0 0 12px;
+    background:linear-gradient(100deg, var(--amber) 0%, var(--magenta) 55%, var(--violet) 100%);
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+  }
+  .landing-tag{
+    font-size:16px;
+    color:var(--muted);
+    line-height:1.55;
+    margin:0 0 34px;
+  }
+  .landing-strip{
+    display:flex;gap:18px;justify-content:center;flex-wrap:wrap;
+    margin-top:30px;
+    font-size:12px;color:var(--muted);
+  }
+  .landing-strip span{display:flex;align-items:center;gap:6px;}
+  .landing-strip .sw{width:7px;height:7px;border-radius:50%;}
+
+  /* ============ APP SHELL ============ */
+  #app{display:none;min-height:100vh;padding-bottom:90px;}
+  #app.visible{display:block;}
+  #app.enter{opacity:0;transform:translateY(16px);}
+  #app.enter.enter-active{
+    opacity:1;transform:translateY(0);
+    transition:opacity 0.45s ease, transform 0.45s ease;
+  }
+  @media (prefers-reduced-motion: reduce){
+    #app.enter{opacity:0;transform:none;}
+    #app.enter.enter-active{transition:opacity 0.2s linear;}
+  }
+
+  .topbar{
+    position:sticky;top:0;z-index:30;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 18px;
+    padding-top:calc(14px + env(safe-area-inset-top));
+    background:rgba(var(--bg-rgb),0.88);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .topbar-brand{display:flex;align-items:center;gap:9px;}
+  .topbar-brand svg{width:26px;height:26px;}
+  .topbar-brand span{
+    font-family:'Fraunces',serif;font-weight:600;font-size:18px;
+  }
+  .navtabs{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line-soft);padding:3px;border-radius:11px;}
+  .navtabs button{
+    background:none;border:none;color:var(--muted);
+    font-family:inherit;font-size:12.5px;font-weight:600;
+    padding:7px 12px;border-radius:8px;cursor:pointer;
+  }
+  .navtabs button.active{background:var(--surface-raised);color:var(--text);}
+
+  .page{max-width:640px;margin:0 auto;padding:22px 18px;display:none;}
+  .page.active{display:block;}
+
+  .tagline{color:var(--muted);font-size:14.5px;margin:0 0 22px;}
+  .discover-tagline-wrap{text-align:center;margin:4px 0 26px;}
+  .discover-tagline{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:clamp(34px,10vw,48px);
+    line-height:1;
+    letter-spacing:0.06em;
+    display:inline-block;
+    transform:rotate(-2deg);
+    background:linear-gradient(110deg, var(--teal) 0%, var(--amber) 35%, var(--magenta) 70%, var(--violet) 100%);
+    background-size:220% 100%;
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+    filter:drop-shadow(0 6px 22px rgba(var(--magenta-rgb),0.35));
+    animation:taglineShimmer 7s ease-in-out infinite alternate;
+  }
+  .discover-tagline::after{
+    content:"";
+    display:block;
+    width:64px;height:3px;margin:10px auto 0;
+    border-radius:2px;
+    background:linear-gradient(100deg, var(--amber), var(--magenta), var(--violet));
+    transform:rotate(-2deg);
+  }
+  @keyframes taglineShimmer{
+    0%{background-position:0% 50%;}
+    100%{background-position:100% 50%;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .discover-tagline{animation:none;}
+  }
+  .page-title{font-family:'Fraunces',serif;font-weight:600;font-size:26px;margin:0 0 4px;}
+
+  /* search / scan */
+  .scan-box{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:16px;
+    margin-bottom:22px;
+  }
+  .scan-row{display:flex;gap:8px;}
+  .scan-row input, .field input, .field select, .field textarea{
+    flex:1;
+    background:var(--surface-raised);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:inherit;
+    font-size:14.5px;
+    padding:11px 13px;
+    border-radius:10px;
+    outline:none;
+    width:100%;
+  }
+  .scan-row input::placeholder, .field input::placeholder, .field textarea::placeholder{color:var(--muted);}
+  .scan-row input:focus, .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--amber-dim);}
+  .scan-btn, .primary-btn{
+    background:linear-gradient(100deg, var(--amber), var(--magenta));
+    color:var(--ink);
+    border:none;
+    font-family:inherit;
+    font-weight:700;
+    font-size:14px;
+    padding:0 18px;
+    border-radius:10px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .primary-btn{padding:13px 18px;width:100%;font-size:14.5px;}
+  .primary-btn:disabled{opacity:0.5;cursor:not-allowed;}
+  .scan-btn:active, .primary-btn:active{transform:scale(0.98);}
+  .scan-status{
+    display:flex;align-items:center;gap:8px;
+    margin-top:12px;font-size:13px;color:var(--muted);
+    min-height:18px;
+  }
+  .scan-status .pulse{
+    width:6px;height:6px;border-radius:50%;background:var(--teal);
+    animation:pulse 1.1s infinite ease-in-out;
+  }
+  @keyframes pulse{0%,100%{opacity:0.3;}50%{opacity:1;}}
+
+  /* section headers */
+  .section-head{
+    display:flex;align-items:center;justify-content:space-between;
+    margin:30px 0 12px;
+  }
+  .section-head h2{
+    font-family:'Fraunces',serif;
+    font-weight:500;
+    font-size:19px;
+    margin:0;
+  }
+  .section-head .count{color:var(--muted);font-size:13px;}
+
+  /* event card */
+  .event{
+    display:flex;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:14px;
+    margin-bottom:10px;
+    overflow:hidden;
+    transition:border-color 0.15s ease;
+  }
+  .event:hover{border-color:var(--line-hover);}
+  .event .thumb{
+    width:84px;height:auto;flex-shrink:0;
+    background-size:cover;background-position:center;
+    background-color:var(--surface-raised);
+    position:relative;
+  }
+  .event .thumb::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(90deg, rgba(var(--bg-rgb),0.15), rgba(var(--bg-rgb),0));
+  }
+  .event .body{flex:1;padding:12px 14px;min-width:0;}
+  .event-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+  .event-title{font-size:15px;font-weight:600;margin:0 0 3px;line-height:1.3;}
+  .event-meta{color:var(--muted);font-size:12.5px;line-height:1.5;}
+  .event-tag{
+    font-size:10.5px;font-weight:700;color:var(--muted);
+    background:var(--surface-raised);
+    border:1px solid var(--line);
+    padding:3px 8px;border-radius:20px;
+    flex-shrink:0;
+    white-space:nowrap;
+  }
+  .event-bottom{
+    display:flex;align-items:center;justify-content:space-between;
+    margin-top:10px;
+  }
+  .event-price{font-size:12.5px;color:var(--muted);}
+  .event-actions{display:flex;gap:6px;}
+  .icon-btn{
+    background:var(--surface-raised);
+    border:1px solid var(--line);
+    color:var(--muted);
+    width:32px;height:32px;border-radius:9px;
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    font-size:15px;
+    transition:all 0.15s ease;
+  }
+  .icon-btn:hover{border-color:var(--line-hover);}
+  .icon-btn.active{
+    background:rgba(var(--amber-rgb),0.15);
+    border-color:var(--amber-dim);
+    color:var(--amber);
+  }
+  .ride-btn{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--teal);
+    font-family:inherit;
+    font-size:12px;
+    font-weight:600;
+    padding:7px 11px;
+    border-radius:9px;
+    cursor:pointer;
+    display:flex;align-items:center;gap:5px;
+  }
+  .ride-btn:hover{border-color:var(--teal);}
+
+  .empty{
+    color:var(--muted);
+    font-size:13.5px;
+    padding:22px 16px;
+    text-align:center;
+    border:1px dashed var(--line);
+    border-radius:14px;
+  }
+
+  /* ---- home page events, styled like the Past ("old events") cards ---- */
+  .hero-event{
+    position:relative;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:16px;
+    margin-bottom:14px;
+    overflow:hidden;
+    cursor:pointer;
+    transition:border-color 0.15s ease;
+  }
+  .hero-event:hover{border-color:var(--line-hover);}
+  .hero-event-photo{
+    height:140px;width:100%;
+    background-size:cover;background-position:center;
+    background-color:var(--surface-raised);
+    position:relative;
+  }
+  .hero-event-photo::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(to top, var(--surface) 0%, rgba(var(--surface-rgb),0.15) 55%, rgba(var(--surface-rgb),0.05) 100%);
+  }
+  .hero-event-tag{
+    position:absolute;top:12px;left:12px;z-index:2;
+    display:inline-flex;align-items:center;gap:5px;
+    background:rgba(var(--bg-rgb),0.65);
+    backdrop-filter:blur(4px);
+    border:1px solid rgba(var(--amber-rgb),0.5);
+    color:var(--chip-text);
+    font-size:11px;font-weight:700;
+    padding:4px 9px;border-radius:20px;
+    white-space:nowrap;
+  }
+  .hero-event-tag.hosted-tag{border-color:rgba(var(--amber-rgb),0.7);color:var(--amber);}
+  .hero-event-body{padding:4px 16px 16px;}
+  .hero-event-title{font-family:'Fraunces',serif;font-size:17px;font-weight:600;margin:0 0 3px;}
+  .hero-event-loc{color:var(--muted);font-size:13px;margin:0 0 3px;}
+  .hero-event-meta{color:var(--muted);font-size:12.5px;margin:0 0 12px;}
+  .hero-event-bottom{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .hero-event-price{font-size:13px;color:var(--text);font-weight:600;}
+
+  /* ---- past events ---- */
+  .past-card{
+    position:relative;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:16px;
+    margin-bottom:14px;
+    overflow:hidden;
+  }
+  .past-photo{
+    height:150px;width:100%;
+    background-size:cover;background-position:center;
+    position:relative;
+  }
+  .past-photo::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(to top, var(--surface) 0%, rgba(var(--surface-rgb),0.15) 55%, rgba(var(--surface-rgb),0.05) 100%);
+  }
+  .trend-badge{
+    position:absolute;top:12px;left:12px;z-index:2;
+    display:inline-flex;align-items:center;gap:5px;
+    background:rgba(var(--bg-rgb),0.65);
+    backdrop-filter:blur(4px);
+    border:1px solid rgba(var(--magenta-rgb),0.5);
+    color:var(--chip-text-2);
+    font-size:11px;font-weight:700;
+    padding:4px 9px;border-radius:20px;
+    white-space:nowrap;
+  }
+  .past-body{padding:4px 16px 16px;}
+  .past-title{font-family:'Fraunces',serif;font-size:18px;font-weight:600;margin:0 0 3px;}
+  .past-loc{color:var(--muted);font-size:13px;margin-bottom:8px;}
+  .past-blurb{font-size:13.5px;line-height:1.6;color:var(--text-soft);margin:0 0 10px;}
+  .past-stats{display:flex;gap:16px;font-size:12.5px;color:var(--muted);margin-bottom:2px;}
+  .past-stats b{color:var(--text);}
+
+  /* ---- past event comments (client-side demo, not persisted) ---- */
+  .comment-toggle{
+    background:none;border:none;color:var(--teal);font-family:inherit;
+    font-size:12.5px;font-weight:600;cursor:pointer;padding:10px 0 0;
+  }
+  .comment-list{margin-top:10px;display:flex;flex-direction:column;gap:10px;}
+  .comment-item{
+    display:flex;gap:9px;
+    background:var(--surface-raised);border:1px solid var(--line);
+    border-radius:12px;padding:9px 10px;
+  }
+  .comment-photo{width:40px;height:40px;border-radius:9px;object-fit:cover;flex-shrink:0;}
+  .comment-author{font-size:12.5px;font-weight:700;}
+  .comment-text{font-size:12.5px;color:var(--text-soft);line-height:1.5;margin-top:1px;}
+  .comment-form{margin-top:10px;display:flex;flex-direction:column;gap:8px;}
+  .comment-form textarea{
+    width:100%;min-height:56px;resize:vertical;
+    background:var(--surface-raised);border:1px solid var(--line);border-radius:10px;
+    color:var(--text);font-family:inherit;font-size:13px;padding:9px 11px;
+  }
+  .comment-form-row{display:flex;align-items:center;gap:8px;}
+  .comment-photo-btn{
+    background:var(--surface-raised);border:1px solid var(--line);color:var(--muted);
+    border-radius:9px;padding:8px 10px;font-size:12px;cursor:pointer;flex-shrink:0;
+  }
+  .comment-photo-btn.has-photo{color:var(--teal);border-color:var(--teal-dim);}
+  .comment-submit{
+    margin-left:auto;background:linear-gradient(100deg, var(--amber), var(--magenta));
+    color:var(--ink);border:none;border-radius:9px;padding:8px 16px;
+    font-family:inherit;font-weight:700;font-size:12.5px;cursor:pointer;
+  }
+
+  /* ---- host ---- */
+  .host-hero{
+    background:linear-gradient(135deg, rgba(var(--amber-rgb),0.12), rgba(var(--magenta-rgb),0.10));
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:20px;
+    margin-bottom:22px;
+  }
+  .host-hero h3{font-family:'Fraunces',serif;font-size:20px;margin:0 0 6px;}
+  .host-hero p{color:var(--muted);font-size:13.5px;margin:0;line-height:1.55;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px;font-weight:600;}
+  .field textarea{resize:vertical;min-height:80px;font-family:inherit;}
+  .steps{display:flex;gap:6px;margin-bottom:20px;}
+  .step-pip{flex:1;height:4px;border-radius:3px;background:var(--line);}
+  .step-pip.done{background:linear-gradient(100deg,var(--amber),var(--magenta));}
+  .upload-box{
+    border:1.5px dashed var(--line);
+    border-radius:14px;
+    padding:26px 16px;
+    text-align:center;
+    cursor:pointer;
+    background:var(--surface-raised);
+  }
+  .upload-box:hover{border-color:var(--amber-dim);}
+  .upload-box .icon{font-size:26px;margin-bottom:8px;}
+  .upload-box .hint{font-size:12px;color:var(--muted);margin-top:4px;}
+  p.hint{font-size:13px;color:var(--muted);line-height:1.5;}
+  .id-preview{
+    display:flex;align-items:center;gap:12px;
+    background:var(--surface-raised);border:1px solid var(--line);
+    border-radius:12px;padding:10px 12px;margin-top:12px;
+  }
+  .id-preview img{width:52px;height:52px;object-fit:cover;border-radius:8px;}
+  .id-preview .name{font-size:13px;font-weight:600;}
+  .id-preview .status{font-size:12px;color:var(--muted);}
+  .status-pill{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:12px;font-weight:600;
+    padding:6px 11px;border-radius:20px;
+    margin-bottom:16px;
+  }
+  .status-pill.pending{background:rgba(var(--amber-rgb),0.15);color:var(--amber);border:1px solid var(--amber-dim);}
+  .status-pill.verified{background:rgba(var(--teal-rgb),0.15);color:var(--teal);border:1px solid var(--teal-dim);}
+  .spin{
+    width:9px;height:9px;border-radius:50%;
+    border:1.5px solid currentColor;border-top-color:transparent;
+    animation:spin 0.8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .hosted-tag{color:var(--amber) !important;}
+
+  /* toast notification */
+  #toast-layer{
+    position:fixed;top:16px;left:50%;transform:translateX(-50%);
+    z-index:80;
+    display:flex;flex-direction:column;gap:8px;
+    width:calc(100% - 36px);
+    max-width:600px;
+  }
+  .toast{
+    background:var(--surface-raised);
+    border:1px solid var(--amber-dim);
+    border-left:3px solid var(--amber);
+    border-radius:12px;
+    padding:12px 14px;
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    box-shadow:0 12px 30px rgba(0,0,0,0.4);
+    animation:slideDown 0.25s ease;
+  }
+  @keyframes slideDown{from{opacity:0;transform:translateY(-10px);}to{opacity:1;transform:translateY(0);}}
+  .toast-title{font-size:13.5px;font-weight:600;margin:0 0 2px;}
+  .toast-body{font-size:12.5px;color:var(--muted);margin:0;}
+  .toast-close{
+    margin-left:auto;background:none;border:none;color:var(--muted);
+    cursor:pointer;font-size:16px;line-height:1;padding:2px;
+  }
+
+  /* ride sheet + generic sheet overlay */
+  #overlay{
+    position:fixed;inset:0;background:rgba(9,6,18,0.75);
+    display:none;align-items:flex-end;justify-content:center;
+    z-index:70;
+  }
+  #overlay.open{display:flex;}
+  .sheet{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-bottom:none;
+    width:100%;max-width:640px;
+    max-height:88vh;
+    overflow-y:auto;
+    border-radius:20px 20px 0 0;
+    padding:22px 20px 26px;
+    animation:riseUp 0.22s ease;
+  }
+  @keyframes riseUp{from{transform:translateY(24px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+  .sheet-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;}
+  .sheet-head h3{font-family:'Fraunces',serif;font-weight:500;font-size:20px;margin:0;}
+  .sheet-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;}
+  .route{display:flex;gap:12px;margin-bottom:18px;}
+  .route-dots{display:flex;flex-direction:column;align-items:center;padding-top:5px;}
+  .route-dots .dot{width:8px;height:8px;border-radius:50%;background:var(--teal);}
+  .route-dots .dot.end{background:var(--amber);}
+  .route-dots .line{width:1px;flex:1;background:var(--line);margin:4px 0;min-height:24px;}
+  .route-lines{flex:1;display:flex;flex-direction:column;gap:20px;}
+  .route-lines div{font-size:14px;}
+  .route-lines .sub{color:var(--muted);font-size:12.5px;margin-top:2px;}
+  .ride-options{display:flex;flex-direction:column;gap:8px;margin-bottom:18px;}
+  .ride-opt{
+    display:flex;justify-content:space-between;align-items:center;
+    background:var(--surface-raised);border:1px solid var(--line);
+    border-radius:12px;padding:12px 14px;cursor:pointer;
+  }
+  .ride-opt.selected{border-color:var(--amber-dim);background:rgba(var(--amber-rgb),0.08);}
+  .ride-opt-left{display:flex;flex-direction:column;}
+  .ride-opt-name{font-size:14px;font-weight:600;}
+  .ride-opt-sub{font-size:12px;color:var(--muted);}
+  .ride-opt-price{font-size:14.5px;font-weight:600;}
+  .request-btn{
+    width:100%;
+    background:linear-gradient(100deg, var(--amber), var(--magenta));
+    color:var(--ink);
+    border:none;padding:14px;border-radius:12px;
+    font-family:inherit;font-weight:700;font-size:15px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  .demo-note{
+    font-size:11.5px;color:var(--muted);text-align:center;margin-top:14px;
+    padding-top:12px;border-top:1px solid var(--line);
+  }
+  .link-btn{
+    background:none;border:none;color:var(--teal);font-family:inherit;
+    font-size:13px;font-weight:600;cursor:pointer;padding:0;
+  }
+
+  /* ---- discover filters ---- */
+  #filter-bar{
+    display:flex;align-items:center;gap:10px;
+    margin-bottom:14px;
+  }
+  .filter-chips{
+    display:flex;gap:7px;overflow-x:auto;flex:1;
+    scrollbar-width:none;
+  }
+  .filter-chips::-webkit-scrollbar{display:none;}
+  .filter-chip{
+    flex-shrink:0;
+    background:var(--surface-raised);border:1px solid var(--line);color:var(--muted);
+    font-family:inherit;font-size:12.5px;font-weight:600;
+    padding:7px 13px;border-radius:20px;cursor:pointer;white-space:nowrap;
+    transition:all 0.15s ease;
+  }
+  .filter-chip.active{background:rgba(var(--amber-rgb),0.15);border-color:var(--amber-dim);color:var(--amber);}
+  .sort-select{
+    flex-shrink:0;
+    background:var(--surface-raised);border:1px solid var(--line);color:var(--text);
+    font-family:inherit;font-size:12.5px;font-weight:600;
+    padding:7px 10px;border-radius:20px;cursor:pointer;
+  }
+
+  /* ---- friends-going mock social proof ---- */
+  .friends-going{
+    display:flex;align-items:center;gap:6px;
+    font-size:12px;color:var(--muted);margin-top:6px;
+  }
+  .friend-avatars{display:flex;}
+  .friend-avatar{
+    width:18px;height:18px;border-radius:50%;
+    background:var(--surface-raised);border:1.5px solid var(--surface);
+    display:flex;align-items:center;justify-content:center;
+    font-size:11px;margin-left:-6px;
+  }
+  .friend-avatar:first-child{margin-left:0;}
+
+  /* ---- real map embed ---- */
+  .map-frame{width:100%;height:280px;border:0;border-radius:14px;display:block;}
+
+  /* ---- onboarding vibe picker ---- */
+  .onboarding-sub{color:var(--muted);font-size:13px;line-height:1.5;margin:0 0 16px;}
+  .vibe-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;}
+  .vibe-chip{
+    background:var(--surface-raised);border:1px solid var(--line);color:var(--text);
+    font-family:inherit;font-size:13px;font-weight:600;
+    padding:9px 16px;border-radius:20px;cursor:pointer;
+    transition:all 0.15s ease;
+  }
+  .vibe-chip.active{
+    background:linear-gradient(100deg, rgba(var(--amber-rgb),0.25), rgba(var(--magenta-rgb),0.25));
+    border-color:var(--amber-dim);color:var(--amber);
+  }
+</style>
+</head>
+<body>
+
+<div id="toast-layer"></div>
+
+<!-- ============ GLOBAL FLOATING BUBBLES (visible behind every page) ============ -->
+<div id="bg-bubbles">
+  <div class="bokeh" style="width:120px;height:120px;background:var(--amber);top:8%;left:6%;"></div>
+  <div class="bokeh" style="width:90px;height:90px;background:var(--magenta);top:58%;left:82%;animation-delay:1.2s;"></div>
+  <div class="bokeh" style="width:70px;height:70px;background:var(--violet);top:16%;left:88%;animation-delay:2.4s;"></div>
+  <div class="bokeh" style="width:60px;height:60px;background:var(--teal);top:80%;left:10%;animation-delay:0.6s;"></div>
+  <div class="bokeh" style="width:44px;height:44px;background:var(--amber);top:40%;left:2%;animation-delay:1.8s;opacity:0.35;"></div>
+</div>
+
+<!-- ============ LANDING ============ -->
+<div id="landing">
+  <div class="bokeh" style="width:120px;height:120px;background:var(--amber);top:12%;left:8%;"></div>
+  <div class="bokeh" style="width:90px;height:90px;background:var(--magenta);top:65%;left:78%;animation-delay:1.2s;"></div>
+  <div class="bokeh" style="width:70px;height:70px;background:var(--violet);top:20%;left:82%;animation-delay:2.4s;"></div>
+  <div class="bokeh" style="width:60px;height:60px;background:var(--teal);top:75%;left:14%;animation-delay:0.6s;"></div>
+  <div class="bokeh" style="width:44px;height:44px;background:var(--amber);top:45%;left:4%;animation-delay:1.8s;opacity:0.35;"></div>
+
+  <div class="landing-inner">
+    <svg class="logo-mark" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="lgLand" x1="4" y1="6" x2="60" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0" style="stop-color:var(--amber)"/>
+          <stop offset="0.55" style="stop-color:var(--magenta)"/>
+          <stop offset="1" style="stop-color:var(--violet)"/>
+        </linearGradient>
+      </defs>
+      <path d="M32 4C18.7 4 8 14.7 8 28c0 17 24 32 24 32s24-15 24-32C56 14.7 45.3 4 32 4Z" fill="url(#lgLand)"/>
+      <circle cx="32" cy="27" r="10.5" style="fill:var(--ink)"/>
+      <path d="M28 22.5 38 27l-10 4.5V22.5Z" fill="#FFE7C2"/>
+    </svg>
+    <h1>Marquee</h1>
+    <p class="landing-tag">Nightlife, festivals and trips worth chasing — scouted for you, saved for later, with a ride sorted before you even ask.</p>
+    <div class="landing-progress"><div class="landing-progress-fill animate" id="landing-progress-fill"></div></div>
+    <p class="landing-hint">Entering automatically — tap anywhere to jump in now</p>
+    <div class="landing-strip">
+      <span><span class="sw" style="background:var(--amber)"></span>Discover</span>
+      <span><span class="sw" style="background:var(--magenta)"></span>Save & get notified</span>
+      <span><span class="sw" style="background:var(--teal)"></span>Ride there</span>
+      <span><span class="sw" style="background:var(--violet)"></span>Host your own</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ APP SHELL ============ -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-brand">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="lgNav" x1="4" y1="6" x2="60" y2="58" gradientUnits="userSpaceOnUse">
+            <stop offset="0" style="stop-color:var(--amber)"/><stop offset="0.55" style="stop-color:var(--magenta)"/><stop offset="1" style="stop-color:var(--violet)"/>
+          </linearGradient>
+        </defs>
+        <path d="M32 4C18.7 4 8 14.7 8 28c0 17 24 32 24 32s24-15 24-32C56 14.7 45.3 4 32 4Z" fill="url(#lgNav)"/>
+        <circle cx="32" cy="27" r="10.5" style="fill:var(--ink)"/>
+        <path d="M28 22.5 38 27l-10 4.5V22.5Z" fill="#FFE7C2"/>
+      </svg>
+      <span>Marquee</span>
+    </div>
+    <div class="navtabs">
+      <button id="tab-discover" class="active" onclick="showPage('discover')">Discover</button>
+      <button id="tab-past" onclick="showPage('past')">Past</button>
+      <button id="tab-host" onclick="showPage('host')">Account</button>
+      <button id="tab-admin" onclick="showPage('admin')" style="display:none">Admin</button>
+    </div>
+  </div>
+
+  <!-- ---- ADMIN PAGE (hidden unless currentUser.isAdmin) ---- -->
+  <div class="page" id="page-admin">
+    <div class="section-head"><h2>Admin — manage events</h2></div>
+    <div id="admin-content"></div>
+  </div>
+
+  <!-- ---- DISCOVER PAGE ---- -->
+  <div class="page active" id="page-discover">
+    <div class="discover-tagline-wrap"><p class="discover-tagline">Your No.1 Plug</p></div>
+
+    <div class="scan-box">
+      <div class="scan-row">
+        <input id="location-input" type="text" placeholder="Where are you looking? (city or area)" value="Johannesburg" />
+        <button class="scan-btn" onclick="runScan()">Scan</button>
+      </div>
+      <div class="scan-status" id="scan-status"></div>
+    </div>
+
+    <div class="section-head">
+      <h2>Found nearby</h2>
+      <span class="count" id="found-count">0 events</span>
+    </div>
+    <div id="filter-bar"></div>
+    <div id="found-list"></div>
+
+    <div class="section-head">
+      <h2>Your events</h2>
+      <span class="count" id="fav-count">0 saved</span>
+    </div>
+    <div id="fav-list"></div>
+  </div>
+
+  <!-- ---- PAST EVENTS PAGE ---- -->
+  <div class="page" id="page-past">
+    <p class="page-title">Made waves</p>
+    <p class="tagline">Past events people are still talking about.</p>
+    <div id="past-list"></div>
+  </div>
+
+  <!-- ---- HOST PAGE ---- -->
+  <div class="page" id="page-host">
+    <p class="page-title">Host</p>
+    <p class="tagline">Post your own event — parties, trips, pop-ups, meetups.</p>
+    <div id="host-content"></div>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="sheet" id="sheet-content"></div>
+</div>
+
+<script>
+// ================= backend API client =================
+// Same origin as this page when served by the backend (see server.js);
+// override by loading this file with ?api=http://localhost:4000 during dev
+// if you're opening it directly as a file instead of through the server.
+const API_BASE = new URLSearchParams(location.search).get('api') || '';
+let authToken = localStorage.getItem('marquee_token') || null;
+let currentUser = null; // { id, name, email, verificationStatus } once loaded
+
+async function apiFetch(path, opts = {}){
+  const headers = Object.assign({}, opts.headers);
+  if(!(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+  if(authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const res = await fetch(API_BASE + path, Object.assign({}, opts, { headers }));
+  let data = null;
+  try { data = await res.json(); } catch(e) { /* no body */ }
+  if(!res.ok){
+    if(res.status === 401){ logout(false); }
+    throw new Error((data && data.error) || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+function setAuth(token, user){
+  authToken = token;
+  currentUser = user;
+  if(token) localStorage.setItem('marquee_token', token);
+  else localStorage.removeItem('marquee_token');
+}
+
+function logout(rerender = true){
+  setAuth(null, null);
+  favorites = {};
+  myHostedEvents = [];
+  updateAdminTabVisibility();
+  if(rerender){
+    renderFavorites();
+    hostState.mode = 'signup';
+    hostState.view = 'profile';
+    renderHost();
+    showToast('Logged out', 'Come back anytime.');
+  }
+}
+
+// Pulls current-user + favorites + hosted events from the server once we
+// know we have a (possibly still valid) token, so a refresh doesn't lose
+// your session the way the old in-memory-only prototype did.
+async function bootstrapSession(){
+  if(!authToken) return;
+  try{
+    const { user } = await apiFetch('/api/auth/me');
+    currentUser = user;
+    await Promise.all([loadFavorites(), loadMyHostedEvents()]);
+  } catch(err){
+    console.warn('Session restore failed:', err.message);
+  }
+  updateAdminTabVisibility();
+}
+
+function updateAdminTabVisibility(){
+  document.getElementById('tab-admin').style.display = (currentUser && currentUser.isAdmin) ? '' : 'none';
+}
+
+async function loadFavorites(){
+  if(!authToken) return;
+  const { favorites: favs } = await apiFetch('/api/favorites');
+  favorites = {};
+  favs.forEach(ev => favorites[ev.id] = ev);
+  renderFavorites();
+  renderFound();
+}
+
+async function loadMyHostedEvents(){
+  if(!authToken) return;
+  const { events } = await apiFetch('/api/events/mine/hosted');
+  myHostedEvents = events;
+}
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => console.warn('SW registration failed:', err));
+  });
+}
+
+// ================= landing / nav =================
+let hasEntered = false;
+const AUTO_ENTER_MS = 5000;
+let autoEnterTimer = setTimeout(enterApp, AUTO_ENTER_MS);
+
+function enterApp(e){
+  if(e) e.preventDefault();
+  if(hasEntered) return;
+  hasEntered = true;
+  clearTimeout(autoEnterTimer);
+
+  const landing = document.getElementById('landing');
+  const app = document.getElementById('app');
+  landing.classList.add('leaving');
+
+  setTimeout(() => {
+    landing.style.display = 'none';
+    app.classList.add('visible', 'enter');
+    // force a layout flush so the browser registers the starting state
+    // before we flip to the transitioned state
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => app.classList.add('enter-active'));
+    });
+    window.scrollTo(0,0);
+    setTimeout(showOnboarding, 900);
+  }, 450);
+}
+// tapping anywhere on the landing screen skips straight in
+document.getElementById('landing').addEventListener('click', enterApp, {passive:false});
+
+function showPage(name){
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.navtabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+  if(name === 'past' && !pastRendered){ renderPast(); }
+  if(name === 'host'){ renderHost(); }
+  if(name === 'admin'){ renderAdmin(); }
+  window.scrollTo(0,0);
+}
+
+// ================= real photo library (Unsplash, hotlinked) =================
+function img(id){ return `https://images.unsplash.com/${id}?auto=format&fit=crop&w=800&q=60`; }
+const PHOTO = {
+  party:      img('photo-1758272133406-159ba07499dc'), // rooftop night party
+  neon:       img('photo-1758165532022-a68f291317ba'), // neon-lit rooftop bar
+  festival:   img('photo-1666289186874-0d023fe7d002'), // concert / festival crowd
+  ocean:      img('photo-1671517263464-0ed62303c5ec'), // sailboat sunset
+  market:     img('photo-1768511813756-fbcd895a4225'), // night food market
+  foodstalls: img('photo-1775919257227-5834c0048a55'), // outdoor food stalls
+  stadium:    img('photo-1556816214-6d16c62fbbf6'),    // stadium crowd
+  stadium2:   img('photo-1781152791873-ced9456b14ac'), // floodlit football match
+  carnival:   img('photo-1777925183965-799d6687ee9a'), // carnival parade
+  projector:  img('photo-1633510964011-05b18d618db5'), // film projector / cinema
+  meetup:     img('photo-1675716921224-e087a0cca69a'), // networking event
+  officechat: img('photo-1758691736979-ff263c04b3d1'), // people talking, office hallway
+};
+const CAT_PHOTO = {
+  Music:"party", Market:"market", Sport:"stadium", Film:"projector",
+  Food:"foodstalls", Meetup:"meetup", Travel:"ocean",
+};
+
+// Event data now lives in the backend DB (seeded from what used to be this
+// array — see backend/src/seedEvents.js) and is fetched by runScan() below.
+// lastCity tracks the resolved city so the host form can default to it.
+let lastCity = 'Johannesburg';
+
+const PAST_EVENTS = [
+  {title:"Neon Desert Festival", loc:"Dubai, UAE", photo:"festival", blurb:"A one-night desert rave that turned into the most reposted festival clip of the year after its drone light finale.", views:"2.4M views", attend:"18,000 attended"},
+  {title:"Full Moon Beach Party", loc:"Koh Phangan, Thailand", photo:"ocean", blurb:"The monthly beach rave that travel pages can't stop posting — fire shows, silent-disco tents and sunrise sets.", views:"1.8M views", attend:"30,000 attended"},
+  {title:"Rio Carnival Afterparty Series", loc:"Rio de Janeiro, Brazil", photo:"carnival", blurb:"The unofficial after-parties outlasted the main parade in online buzz, with samba-fusion sets running till sunrise.", views:"3.1M views", attend:"Sold out, 5 nights"},
+  {title:"Coachella Secret Set", loc:"California, USA", photo:"party", blurb:"An unannounced surprise set on a side stage that ended up out-trending the headliners entirely.", views:"5.6M views", attend:"Capacity crowd"},
+  {title:"Ibiza Sunset Boat Party", loc:"Ibiza, Spain", photo:"ocean", blurb:"A single boat party clip of the sunset drop became the most-shared nightlife video of the summer.", views:"1.2M views", attend:"600 aboard"},
+];
+
+let foundEvents = [];
+let favorites = {};
+let notifiedIds = new Set();
+let pendingRideEvent = null;
+let selectedRideOption = 1;
+let pastRendered = false;
+let activeCategory = 'All';
+let sortMode = 'soonest';
+let userVibes = new Set();
+let onboardingShown = false;
+let pastComments = {}; // past-event index -> [{author, text, photo}]
+
+const RIDE_OPTIONS = [
+  {id:0, name:"UberX", eta:"4 min", price:"R84"},
+  {id:1, name:"Comfort", eta:"6 min", price:"R118"},
+  {id:2, name:"UberXL", eta:"8 min", price:"R156"},
+];
+
+async function runScan(){
+  const status = document.getElementById('scan-status');
+  const locRaw = document.getElementById('location-input').value;
+  const loc = locRaw.trim() || "your area";
+  status.innerHTML = `<span class="pulse"></span> Scanning listings, venues and socials near ${escapeHtml(loc)}…`;
+  document.getElementById('found-list').innerHTML = '';
+  document.getElementById('found-count').textContent = '…';
+
+  try{
+    const { city, events, message } = await apiFetch('/api/events?city=' + encodeURIComponent(locRaw));
+    if(!city || events.length === 0){
+      foundEvents = [];
+      status.textContent = message || `No live coverage for "${loc}" yet — try Johannesburg, Cape Town, Durban or Pretoria.`;
+      renderFound();
+      return;
+    }
+    lastCity = city;
+    foundEvents = events;
+    status.textContent = `Scan complete — found ${foundEvents.length} events in ${city}, updated just now.`;
+    renderFound();
+  } catch(err){
+    status.textContent = `Couldn't reach the server — ${err.message}`;
+    renderFound();
+  }
+}
+
+function parsePrice(price){
+  if(/free/i.test(price)) return 0;
+  const m = price.match(/(\d+(\.\d+)?)/);
+  return m ? parseFloat(m[1]) : Infinity;
+}
+function renderFound(){
+  const list = document.getElementById('found-list');
+  const bar = document.getElementById('filter-bar');
+  document.getElementById('found-count').textContent = foundEvents.length + ' events';
+
+  if(foundEvents.length === 0){
+    list.innerHTML = `<div class="empty">No events found yet. Run a scan above.</div>`;
+    bar.innerHTML = '';
+    return;
+  }
+
+  const cats = ['All', ...new Set(foundEvents.map(e => e.cat))];
+  if(!cats.includes(activeCategory)) activeCategory = 'All';
+  bar.innerHTML = `
+    <div class="filter-chips">
+      ${cats.map(c => `<button class="filter-chip ${c === activeCategory ? 'active' : ''}" onclick="setCategory('${c}')">${c}</button>`).join('')}
+    </div>
+    <select class="sort-select" onchange="setSort(this.value)" aria-label="Sort events">
+      <option value="soonest" ${sortMode === 'soonest' ? 'selected' : ''}>Soonest</option>
+      <option value="cheapest" ${sortMode === 'cheapest' ? 'selected' : ''}>Cheapest</option>
+    </select>
+  `;
+
+  let shown = activeCategory === 'All' ? [...foundEvents] : foundEvents.filter(e => e.cat === activeCategory);
+
+  if(sortMode === 'cheapest') shown.sort((a,b) => parsePrice(a.price) - parsePrice(b.price));
+  else if(userVibes.size){
+    // "Soonest" (default order) but nudged so picks matching your onboarding
+    // vibes float to the top of the batch.
+    shown.sort((a,b) => (userVibes.has(b.cat) ? 1 : 0) - (userVibes.has(a.cat) ? 1 : 0));
+  }
+
+  if(shown.length === 0){
+    list.innerHTML = `<div class="empty">No ${escapeHtml(activeCategory.toLowerCase())} events in this batch — try another category.</div>`;
+    return;
+  }
+  list.innerHTML = shown.map(ev => eventCard(ev, false)).join('');
+}
+function setCategory(c){ activeCategory = c; renderFound(); }
+function setSort(v){ sortMode = v; renderFound(); }
+
+function renderFavorites(){
+  const list = document.getElementById('fav-list');
+  const favs = Object.values(favorites);
+  document.getElementById('fav-count').textContent = favs.length + ' saved';
+  if(favs.length === 0){
+    list.innerHTML = `<div class="empty">Tap the star on an event to save it and get a reminder.</div>`;
+    return;
+  }
+  list.innerHTML = favs.map(ev => eventCard(ev, true)).join('');
+}
+
+function eventCard(ev, isFav){
+  const starActive = favorites[ev.id] ? 'active' : '';
+  const photoKey = ev.photoKey || CAT_PHOTO[ev.cat] || 'party';
+  const photoUrl = ev.photoUrl || PHOTO[photoKey];
+  return `
+  <div class="hero-event" onclick="openEventSource(${ev.id})">
+    <div class="hero-event-photo" style="background-image:url('${photoUrl}')">
+      <span class="hero-event-tag ${ev.hosted ? 'hosted-tag' : ''}">${ev.hosted ? 'Hosted by you' : ev.cat}</span>
+    </div>
+    <div class="hero-event-body">
+      <p class="hero-event-title">${escapeHtml(ev.title)}</p>
+      <p class="hero-event-loc">${escapeHtml(ev.venue)}</p>
+      <p class="hero-event-meta">${ev.date}</p>
+      ${friendsBadge(ev.id)}
+      <div class="hero-event-bottom">
+        <span class="hero-event-price">${ev.price}</span>
+        <div class="event-actions">
+          <button class="icon-btn" onclick="event.stopPropagation(); openMap(${ev.id})" title="View on map">🗺️</button>
+          ${isFav ? `<button class="ride-btn" onclick="event.stopPropagation(); openRide(${ev.id})">🚗 Ride</button>` : ''}
+          <button class="icon-btn ${starActive}" onclick="event.stopPropagation(); toggleFavorite(${ev.id})" title="Notify me">★</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Mock social proof — there's no real friends graph behind this demo, just a
+// stable pseudo-random count derived from the event id so it doesn't flicker
+// between re-renders. Wire this up to real contacts data to make it genuine.
+const FRIEND_EMOJI = ['🧑🏽','🧑🏻','🧑🏾','🧑🏿','🧑🏼'];
+function friendsGoing(id){
+  const seed = (id * 9301 + 49297) % 233280;
+  return Math.floor((seed / 233280) * 6); // 0–5
+}
+function friendsBadge(id){
+  const n = friendsGoing(id);
+  if(n === 0) return '';
+  const avatars = FRIEND_EMOJI.slice(0, Math.min(n, 3)).map(e => `<span class="friend-avatar">${e}</span>`).join('');
+  return `<div class="friends-going"><span class="friend-avatars">${avatars}</span>${n} friend${n > 1 ? 's' : ''} going</div>`;
+}
+
+// Opens the original listing for an event in a new tab. Hosted events now
+// carry a real source_url (collected on the "Post an event" form), so this
+// takes the user straight there with no intermediate page. Only the older
+// seed/demo events (which predate that field, or where a host skipped it)
+// fall back to a Google search — real listings should always have ev.url set.
+function openEventSource(id){
+  const ev = favorites[id] || foundEvents.find(e => e.id === id) || myHostedEvents.find(e => e.id === id);
+  if(!ev) return;
+  if(ev.url){
+    window.open(ev.url, '_blank', 'noopener');
+    return;
+  }
+  const url = `https://www.google.com/search?q=${encodeURIComponent(ev.title + ' ' + ev.venue)}&btnI=1`;
+  window.open(url, '_blank', 'noopener');
+}
+
+async function toggleFavorite(id){
+  if(!authToken){
+    showToast('Log in to save events', 'Head to the Host tab to create a free account.');
+    return;
+  }
+  const ev = foundEvents.find(e => e.id === id) || myHostedEvents.find(e => e.id === id) || favorites[id];
+  try{
+    if(favorites[id]){
+      delete favorites[id];
+      await apiFetch('/api/favorites/' + id, { method: 'DELETE' });
+    } else {
+      favorites[id] = ev;
+      await apiFetch('/api/favorites/' + id, { method: 'POST' });
+      scheduleDemoReminder(ev);
+      showToast(`Saved — you'll get a reminder before ${ev.title}.`, `${ev.date}`);
+    }
+  } catch(err){
+    // roll back the optimistic update on failure
+    if(favorites[id] === ev) delete favorites[id];
+    showToast("Couldn't save that", err.message);
+  }
+  renderFound();
+  renderFavorites();
+}
+
+function scheduleDemoReminder(ev){
+  const delay = 8000 + Math.random()*4000;
+  setTimeout(() => {
+    if(favorites[ev.id] && !notifiedIds.has(ev.id)){
+      notifiedIds.add(ev.id);
+      showToast(`Reminder: ${ev.title}`, `Starts soon at ${ev.venue} — want a ride there?`, true, ev.id);
+    }
+  }, delay);
+}
+
+function showToast(title, body, withRideAction, evId){
+  const layer = document.getElementById('toast-layer');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `
+    <div style="flex:1">
+      <p class="toast-title">${escapeHtml(title)}</p>
+      <p class="toast-body">${escapeHtml(body)}</p>
+      ${withRideAction ? `<button class="ride-btn" style="margin-top:8px" onclick="openRide(${evId}); this.closest('.toast').remove();">🚗 Get a ride</button>` : ''}
+    </div>
+    <button class="toast-close" onclick="this.closest('.toast').remove()">×</button>
+  `;
+  layer.appendChild(el);
+  setTimeout(() => { if(el.parentNode) el.remove(); }, 9000);
+}
+
+// ================= past events =================
+// Reviews/photos are demo-only: state lives in memory and resets on reload —
+// there's no backend here to persist them yet.
+let pendingCommentPhoto = {}; // idx -> staged photo data URL, cleared on submit
+
+function renderPast(){
+  pastRendered = true;
+  document.getElementById('past-list').innerHTML = PAST_EVENTS.map((p, idx) => `
+    <div class="past-card">
+      <div class="past-photo" style="background-image:url('${PHOTO[p.photo]}')">
+        <span class="trend-badge">🔥 Trending then</span>
+      </div>
+      <div class="past-body">
+        <p class="past-title">${escapeHtml(p.title)}</p>
+        <p class="past-loc">${escapeHtml(p.loc)}</p>
+        <p class="past-blurb">${escapeHtml(p.blurb)}</p>
+        <div class="past-stats"><span><b>${p.views}</b></span><span><b>${p.attend}</b></span></div>
+        ${renderCommentList(idx)}
+        <button class="comment-toggle" onclick="toggleCommentForm(${idx})">💬 Share your take</button>
+        <div class="comment-form" id="comment-form-${idx}" style="display:none">
+          <textarea id="comment-text-${idx}" placeholder="What was it like?"></textarea>
+          <div class="comment-form-row">
+            <input type="file" id="comment-photo-${idx}" accept="image/*" style="display:none" onchange="handlePastPhoto(${idx}, event)" />
+            <button class="comment-photo-btn" id="comment-photo-btn-${idx}" onclick="document.getElementById('comment-photo-${idx}').click()">📷 Add photo</button>
+            <button class="comment-submit" onclick="submitPastComment(${idx})">Post</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderCommentList(idx){
+  const list = pastComments[idx] || [];
+  if(list.length === 0) return '';
+  return `<div class="comment-list">${list.map(c => `
+    <div class="comment-item">
+      ${c.photo ? `<img class="comment-photo" src="${c.photo}" alt="" />` : ''}
+      <div>
+        <div class="comment-author">${escapeHtml(c.author)}</div>
+        <div class="comment-text">${escapeHtml(c.text)}</div>
+      </div>
+    </div>
+  `).join('')}</div>`;
+}
+
+function toggleCommentForm(idx){
+  const form = document.getElementById('comment-form-' + idx);
+  form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+}
+
+function handlePastPhoto(idx, evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    pendingCommentPhoto[idx] = reader.result;
+    const btn = document.getElementById('comment-photo-btn-' + idx);
+    btn.textContent = '📷 Photo added';
+    btn.classList.add('has-photo');
+  };
+  reader.readAsDataURL(file);
+}
+
+function submitPastComment(idx){
+  const textEl = document.getElementById('comment-text-' + idx);
+  const text = textEl.value.trim();
+  if(!text) return;
+  if(!pastComments[idx]) pastComments[idx] = [];
+  pastComments[idx].push({author:'You', text, photo: pendingCommentPhoto[idx] || null});
+  delete pendingCommentPhoto[idx];
+  renderPast();
+  showToast('Posted', "Your take is up — heads up, this demo doesn't save it after you close the page.");
+}
+
+// ================= account / host flow =================
+// Two separate ideas live in this tab, and they're intentionally kept apart:
+//  - "member" — anyone with an account (created via signupFormHtml). Lets
+//    you save favorites and see a profile. No ID verification required.
+//  - "host" — an optional upgrade a member can apply for (hostState.view =
+//    'apply') which requires ID verification (currentUser.verificationStatus)
+//    before they can post events. Being a member never implies being a host.
+let hostState = { mode: 'signup', view: 'profile' }; // mode: 'signup'|'login' (pre-login). view: 'profile'|'apply'|'post' (post-login)
+let myHostedEvents = [];
+
+function renderHost(){
+  const c = document.getElementById('host-content');
+
+  if(!authToken || !currentUser){
+    c.innerHTML = hostState.mode === 'login' ? loginFormHtml() : signupFormHtml();
+    return;
+  }
+
+  // Applying to host: only relevant pre-verification, and only once the
+  // member has actively chosen to apply from their profile.
+  if(hostState.view === 'apply' && currentUser.verificationStatus === 'none'){
+    c.innerHTML = `
+      <div class="host-hero">
+        <h3>Apply to become a host</h3>
+        <p>Upload a photo of your ID to unlock posting events.</p>
+      </div>
+      <span class="status-pill pending">Verification required</span>
+      <div class="upload-box" onclick="document.getElementById('id-upload').click()">
+        <div class="icon">🪪</div>
+        <div>Tap to upload a photo of your ID</div>
+        <div class="hint">JPG or PNG</div>
+      </div>
+      <input type="file" id="id-upload" accept="image/*" style="display:none" onchange="handleIdUpload(event)" />
+      <div id="id-preview-slot"></div>
+      <button class="link-btn" style="display:block;margin-top:16px" onclick="hostState.view='profile'; renderHost();">← Back to profile</button>
+    `;
+    return;
+  }
+
+  // Posting an event: only for verified hosts, and only once they've chosen
+  // to post from their profile — profile stays the default landing view.
+  if(hostState.view === 'post' && currentUser.verificationStatus === 'verified'){
+    const cityOptions = ['Johannesburg','Cape Town','Durban','Pretoria']
+      .map(c2 => `<option ${c2 === lastCity ? 'selected' : ''}>${c2}</option>`).join('');
+    c.innerHTML = `
+      <div class="host-hero">
+        <h3>Post an event</h3>
+        <p>It'll show up in Discover once it's live.</p>
+      </div>
+      <div class="field"><label>Event title</label><input id="ev-title" type="text" placeholder="e.g. Rooftop Sunset Sessions" /></div>
+      <div class="field"><label>Category</label>
+        <select id="ev-cat">
+          <option>Music</option><option>Travel</option><option>Food</option>
+          <option>Sport</option><option>Meetup</option><option>Market</option><option>Film</option>
+        </select>
+      </div>
+      <div class="field"><label>City</label><select id="ev-city">${cityOptions}</select></div>
+      <div class="field"><label>Venue</label><input id="ev-venue" type="text" placeholder="Where's it happening?" /></div>
+      <div class="field"><label>Date & time</label><input id="ev-date" type="text" placeholder="e.g. Sat, 20 Sep · 7:00 PM" /></div>
+      <div class="field"><label>Price</label><input id="ev-price" type="text" placeholder="e.g. Free, or From R150" /></div>
+      <div class="field"><label>Description</label><textarea id="ev-desc" placeholder="What should people know before they come?"></textarea></div>
+      <div class="field"><label>Event link</label><input id="ev-url" type="url" placeholder="Link to the original listing (Instagram, Facebook, Eventbrite...)" /></div>
+      <button class="primary-btn" onclick="submitHostedEvent()">Post event</button>
+      <button class="link-btn" style="display:block;margin-top:16px" onclick="hostState.view='profile'; renderHost();">← Back to profile</button>
+    `;
+    return;
+  }
+
+  // Default landing view once logged in: the member's profile. This is
+  // where "being a member" and "being a host" visibly branch apart.
+  c.innerHTML = profileViewHtml();
+}
+
+function profileViewHtml(){
+  const status = currentUser.verificationStatus;
+  let hostSection;
+  if(status === 'verified'){
+    hostSection = `
+      <span class="status-pill verified">✓ Verified host</span>
+      <button class="primary-btn" style="margin-top:12px" onclick="hostState.view='post'; renderHost();">Post an event</button>
+      ${myHostedEvents.length ? `<div class="section-head"><h2>Your hosted events</h2><span class="count">${myHostedEvents.length}</span></div>` + myHostedEvents.map(ev => eventCard(ev, false)).join('') : ''}
+    `;
+  } else if(status === 'pending'){
+    hostSection = `
+      <span class="status-pill pending"><span class="spin"></span> Verification in review</span>
+      <p class="hint" style="margin-top:8px">Review usually takes 24–48 hours. You'll be able to post events once it clears.</p>
+    `;
+  } else {
+    hostSection = `
+      <p class="hint" style="margin:8px 0 12px">Want to post your own events? Hosting requires a quick ID check.</p>
+      <button class="primary-btn" onclick="hostState.view='apply'; renderHost();">Apply to become a host</button>
+    `;
+  }
+  return `
+    <div class="host-hero">
+      <h3>Your profile</h3>
+      <p>Welcome, ${escapeHtml(currentUser.name)}.</p>
+    </div>
+    <div class="field"><label>Name</label><div>${escapeHtml(currentUser.name)}</div></div>
+    <div class="field"><label>Email</label><div>${escapeHtml(currentUser.email)}</div></div>
+    <div class="section-head"><h2>Hosting</h2></div>
+    ${hostSection}
+    <button class="link-btn" style="display:block;margin-top:16px" onclick="logout()">Log out</button>
+  `;
+}
+
+function signupFormHtml(){
+  return `
+    <div class="host-hero">
+      <h3>Create your account</h3>
+      <p>Save events, get notified, and optionally apply to host your own — all from one free account.</p>
+    </div>
+    <div class="field"><label>Full name</label><input id="host-name" type="text" placeholder="Your name" /></div>
+    <div class="field"><label>Email</label><input id="host-email" type="email" placeholder="you@email.com" /></div>
+    <div class="field"><label>Password</label><input id="host-pass" type="password" placeholder="At least 8 characters" /></div>
+    <button class="primary-btn" onclick="submitSignup()">Create account</button>
+    <button class="link-btn" style="display:block;margin:14px auto 0" onclick="hostState.mode='login'; renderHost();">Already have an account? Log in</button>
+  `;
+}
+
+function loginFormHtml(){
+  return `
+    <div class="host-hero">
+      <h3>Welcome back</h3>
+      <p>Log in to manage your hosted events.</p>
+    </div>
+    <div class="field"><label>Email</label><input id="login-email" type="email" placeholder="you@email.com" /></div>
+    <div class="field"><label>Password</label><input id="login-pass" type="password" placeholder="Your password" /></div>
+    <button class="primary-btn" onclick="submitLogin()">Log in</button>
+    <button class="link-btn" style="display:block;margin:14px auto 0" onclick="hostState.mode='signup'; renderHost();">New here? Create an account</button>
+  `;
+}
+
+async function submitSignup(){
+  const name = document.getElementById('host-name').value.trim();
+  const email = document.getElementById('host-email').value.trim();
+  const password = document.getElementById('host-pass').value;
+  if(!name || !email || !password){
+    showToast('Almost there', 'Add your name, email and a password to continue.');
+    return;
+  }
+  try{
+    const { token, user } = await apiFetch('/api/auth/signup', {
+      method: 'POST', body: JSON.stringify({ name, email, password })
+    });
+    setAuth(token, user);
+    hostState.view = 'profile';
+    updateAdminTabVisibility();
+    await Promise.all([loadFavorites(), loadMyHostedEvents()]);
+    renderHost();
+  } catch(err){
+    showToast("Couldn't create account", err.message);
+  }
+}
+
+async function submitLogin(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-pass').value;
+  if(!email || !password){
+    showToast('Missing details', 'Enter your email and password.');
+    return;
+  }
+  try{
+    const { token, user } = await apiFetch('/api/auth/login', {
+      method: 'POST', body: JSON.stringify({ email, password })
+    });
+    setAuth(token, user);
+    hostState.view = 'profile';
+    updateAdminTabVisibility();
+    await Promise.all([loadFavorites(), loadMyHostedEvents()]);
+    showToast('Welcome back', `Logged in as ${user.name}.`);
+    renderHost();
+  } catch(err){
+    showToast("Couldn't log in", err.message);
+  }
+}
+
+async function handleIdUpload(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('id-preview-slot').innerHTML = `
+      <div class="id-preview">
+        <img src="${e.target.result}" />
+        <div>
+          <div class="name">${escapeHtml(file.name)}</div>
+          <div class="status">Uploading…</div>
+        </div>
+      </div>
+    `;
+  };
+  reader.readAsDataURL(file);
+
+  const form = new FormData();
+  form.append('idImage', file);
+  try{
+    const { message } = await apiFetch('/api/auth/verify-id', { method: 'POST', body: form });
+    currentUser.verificationStatus = 'pending';
+    showToast('ID submitted', message);
+    renderHost();
+
+    // Poll for the (demo) auto-approval so the UI updates without a manual refresh.
+    const poll = setInterval(async () => {
+      try{
+        const { status } = await apiFetch('/api/auth/verify-id/status');
+        if(status === 'verified'){
+          clearInterval(poll);
+          currentUser.verificationStatus = 'verified';
+          showToast("You're verified", 'Your ID was approved — you can post events now.');
+          renderHost();
+        }
+      } catch(e){ clearInterval(poll); }
+    }, 2000);
+  } catch(err){
+    showToast('Upload failed', err.message);
+    renderHost();
+  }
+}
+
+// ================= admin (edit price / date / photo on any event) =================
+let adminEvents = [];
+
+async function renderAdmin(){
+  const c = document.getElementById('admin-content');
+  c.innerHTML = '<p class="hint">Loading events…</p>';
+  try{
+    const { events } = await apiFetch('/api/events/admin/all');
+    adminEvents = events;
+    c.innerHTML = adminEvents.map(adminEventRow).join('') || '<p class="hint">No events yet.</p>';
+  } catch(err){
+    c.innerHTML = `<p class="hint">Couldn't load events — ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function adminEventRow(ev){
+  return `
+  <div class="host-hero" style="margin-bottom:14px">
+    <h3 style="font-size:15px">${escapeHtml(ev.title)}</h3>
+    <p>${escapeHtml(ev.venue)} · ${escapeHtml(ev.city)}</p>
+    <div class="field"><label>Price</label><input id="admin-price-${ev.id}" type="text" value="${escapeHtml(ev.price)}" /></div>
+    <div class="field"><label>Date & time</label><input id="admin-date-${ev.id}" type="text" value="${escapeHtml(ev.date)}" /></div>
+    <div class="field"><label>Photo link</label><input id="admin-photo-${ev.id}" type="url" placeholder="https://..." value="${escapeHtml(ev.photoUrl || '')}" /></div>
+    <button class="primary-btn" onclick="saveAdminEvent(${ev.id})">Save</button>
+  </div>`;
+}
+
+async function saveAdminEvent(id){
+  const price = document.getElementById('admin-price-' + id).value.trim();
+  const date = document.getElementById('admin-date-' + id).value.trim();
+  const photoUrl = document.getElementById('admin-photo-' + id).value.trim();
+  try{
+    await apiFetch('/api/events/admin/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ price, date, photoUrl })
+    });
+    showToast('Saved', 'Event updated.');
+    // Re-run the Discover search so the card reflects the edit immediately.
+    await runScan();
+  } catch(err){
+    showToast("Couldn't save", err.message);
+  }
+}
+
+async function submitHostedEvent(){
+  const title = document.getElementById('ev-title').value.trim();
+  const venue = document.getElementById('ev-venue').value.trim();
+  const date = document.getElementById('ev-date').value.trim();
+  const cat = document.getElementById('ev-cat').value;
+  const city = document.getElementById('ev-city').value;
+  const price = document.getElementById('ev-price').value.trim() || 'Free';
+  const description = document.getElementById('ev-desc').value.trim();
+  const url = document.getElementById('ev-url').value.trim();
+  if(!title || !venue || !date){
+    showToast('Missing details', 'Add at least a title, venue and date.');
+    return;
+  }
+  try{
+    const { event } = await apiFetch('/api/events', {
+      method: 'POST',
+      body: JSON.stringify({ title, venue, date, cat, city, price, description, url })
+    });
+    myHostedEvents.unshift(event);
+    if(city === lastCity) foundEvents.unshift(event);
+    showToast('Event posted', `${title} is now live in Discover.`);
+    renderFound();
+    hostState.view = 'profile';
+    renderHost();
+  } catch(err){
+    showToast("Couldn't post event", err.message);
+  }
+}
+
+// ================= ride sheet (opens the real Uber app / site) =================
+// ================= quick taste onboarding (shown once per visit) =================
+const VIBE_OPTIONS = ["Music","Food","Sport","Film","Market","Meetup"];
+function showOnboarding(){
+  if(onboardingShown) return;
+  onboardingShown = true;
+  document.getElementById('sheet-content').innerHTML = `
+    <div class="sheet-head">
+      <h3>What are you into?</h3>
+      <button class="sheet-close" onclick="skipOnboarding()">×</button>
+    </div>
+    <p class="onboarding-sub">Pick a few — we'll float matching events to the top of your scans. Skip anytime.</p>
+    <div class="vibe-chips" id="vibe-chips">
+      ${VIBE_OPTIONS.map(v => `<button class="vibe-chip" data-vibe="${v}" onclick="toggleVibe('${v}')">${v}</button>`).join('')}
+    </div>
+    <button class="request-btn" onclick="saveOnboarding()">Save my taste</button>
+    <button class="link-btn" style="display:block;margin:12px auto 0" onclick="skipOnboarding()">Skip for now</button>
+  `;
+  document.getElementById('overlay').classList.add('open');
+}
+function toggleVibe(v){
+  if(userVibes.has(v)) userVibes.delete(v); else userVibes.add(v);
+  document.querySelectorAll('#vibe-chips .vibe-chip').forEach(b => {
+    b.classList.toggle('active', userVibes.has(b.dataset.vibe));
+  });
+}
+function saveOnboarding(){
+  closeSheet();
+  if(userVibes.size){
+    showToast('Got it', `We'll prioritize ${[...userVibes].join(', ')} in your scans.`);
+    renderFound();
+  }
+}
+function skipOnboarding(){
+  closeSheet();
+}
+
+function openRide(id){
+  pendingRideEvent = favorites[id] || foundEvents.find(e => e.id === id) || myHostedEvents.find(e => e.id === id);
+  selectedRideOption = 1;
+  renderSheet();
+  document.getElementById('overlay').classList.add('open');
+}
+function closeSheet(){
+  document.getElementById('overlay').classList.remove('open');
+}
+function closeRide(){ closeSheet(); } // kept as an alias for the ride sheet's own close button
+
+// Real OpenStreetMap embed (no API key needed) — genuinely shows the venue,
+// not a mock. Falls back gracefully if an event has no coordinates.
+function openMap(id){
+  const ev = favorites[id] || foundEvents.find(e => e.id === id) || myHostedEvents.find(e => e.id === id);
+  if(!ev) return;
+  if(!ev.lat || !ev.lng){
+    showToast('No pin for this one', `${ev.venue} hasn't got a mapped location yet in this demo.`);
+    return;
+  }
+  const d = 0.012;
+  const bbox = `${ev.lng - d}%2C${ev.lat - d}%2C${ev.lng + d}%2C${ev.lat + d}`;
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${ev.lat}%2C${ev.lng}`;
+  document.getElementById('sheet-content').innerHTML = `
+    <div class="sheet-head">
+      <h3>${escapeHtml(ev.venue)}</h3>
+      <button class="sheet-close" onclick="closeSheet()">×</button>
+    </div>
+    <iframe class="map-frame" src="${src}" loading="lazy" title="Map of ${escapeHtml(ev.venue)}"></iframe>
+    <p class="demo-note">Live map data from OpenStreetMap.</p>
+  `;
+  document.getElementById('overlay').classList.add('open');
+}
+function renderSheet(){
+  const ev = pendingRideEvent;
+  document.getElementById('sheet-content').innerHTML = `
+    <div class="sheet-head">
+      <h3>Ride to ${escapeHtml(ev.title)}</h3>
+      <button class="sheet-close" onclick="closeRide()">×</button>
+    </div>
+    <div class="route">
+      <div class="route-dots">
+        <div class="dot"></div>
+        <div class="line"></div>
+        <div class="dot end"></div>
+      </div>
+      <div class="route-lines">
+        <div>Current location <div class="sub">Detected automatically by Uber</div></div>
+        <div>${escapeHtml(ev.venue)} <div class="sub">${ev.date}</div></div>
+      </div>
+    </div>
+    <div class="ride-options">
+      ${RIDE_OPTIONS.map(o => `
+        <div class="ride-opt ${o.id===selectedRideOption?'selected':''}" onclick="selectRide(${o.id})">
+          <div class="ride-opt-left">
+            <span class="ride-opt-name">${o.name}</span>
+            <span class="ride-opt-sub">${o.eta} away · rough estimate</span>
+          </div>
+          <span class="ride-opt-price">${o.price}</span>
+        </div>
+      `).join('')}
+    </div>
+    <button class="request-btn" onclick="requestUber()">🚗 Open in Uber</button>
+    <p class="demo-note">This hands off to the real Uber app (or uber.com) with your destination pre-filled. Fares and driver matching happen inside Uber.</p>
+  `;
+}
+function selectRide(id){
+  selectedRideOption = id;
+  renderSheet();
+}
+function requestUber(){
+  const ev = pendingRideEvent;
+  const params = new URLSearchParams({
+    action: 'setPickup',
+    pickup: 'my_location',
+    'dropoff[formatted_address]': `${ev.venue}, Johannesburg`,
+  });
+  if(ev.lat && ev.lng){
+    params.set('dropoff[latitude]', ev.lat);
+    params.set('dropoff[longitude]', ev.lng);
+    params.set('dropoff[nickname]', ev.venue);
+  }
+  const url = `https://m.uber.com/ul/?${params.toString()}`;
+  window.open(url, '_blank');
+  closeRide();
+  showToast('Opening Uber', `Handing off to Uber with ${ev.venue} as your drop-off.`);
+}
+
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// initial state
+bootstrapSession().then(() => {
+  runScan();
+  renderFavorites();
+});
+</script>
+
+</body>
+</html>
