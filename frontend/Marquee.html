@@ -423,6 +423,8 @@
     transition:border-color 0.15s ease;
   }
   .hero-event:hover{border-color:var(--line-hover);}
+  .group-expanded{padding:4px 12px 12px;border-top:1px solid var(--line-soft);}
+  .group-expanded .hero-event{margin:12px 0 0;}
   .hero-event-photo{
     height:140px;width:100%;
     background-size:cover;background-position:center;
@@ -445,6 +447,7 @@
     white-space:nowrap;
   }
   .hero-event-tag.hosted-tag{border-color:rgba(var(--amber-rgb),0.7);color:var(--amber);}
+  .hero-event-tag.live-tag{border-color:rgba(var(--teal-rgb),0.7);color:var(--teal);}
   .hero-event-body{padding:4px 16px 16px;}
   .hero-event-title{font-family:'Fraunces',serif;font-size:17px;font-weight:600;margin:0 0 3px;}
   .hero-event-loc{color:var(--muted);font-size:13px;margin:0 0 3px;}
@@ -1109,10 +1112,56 @@ function renderFound(){
     list.innerHTML = `<div class="empty">No ${escapeHtml(activeCategory.toLowerCase())} events in this batch — try another category.</div>`;
     return;
   }
-  list.innerHTML = shown.map(ev => eventCard(ev, false)).join('');
+  list.innerHTML = groupEventsByVenue(shown).map(item => item.isGroup ? groupedEventCard(item) : eventCard(item, false)).join('');
 }
 function setCategory(c){ activeCategory = c; renderFound(); }
 function setSort(v){ sortMode = v; renderFound(); }
+
+// Several real listings (concert series, festival programs, recurring club
+// nights) often come back from Ticketmaster as separate events at the same
+// venue. Grouping them under one collapsible card keeps Discover scannable
+// instead of one venue flooding the feed with near-identical cards.
+let expandedGroups = new Set();
+
+function toggleGroup(key){
+  if(expandedGroups.has(key)) expandedGroups.delete(key); else expandedGroups.add(key);
+  renderFound();
+}
+
+function groupEventsByVenue(events){
+  const map = new Map();
+  events.forEach(ev => {
+    const key = ev.venue.trim().toLowerCase();
+    if(!map.has(key)) map.set(key, []);
+    map.get(key).push(ev);
+  });
+  const result = [];
+  for(const group of map.values()){
+    // Group key is the first event's id — stable, unique, and safe to drop
+    // straight into an inline onclick with no escaping concerns.
+    result.push(group.length > 1 ? { isGroup: true, key: group[0].id, venue: group[0].venue, events: group } : group[0]);
+  }
+  return result;
+}
+
+function groupedEventCard(group){
+  const isOpen = expandedGroups.has(group.key);
+  const first = group.events[0];
+  const photoKey = first.photoKey || CAT_PHOTO[first.cat] || 'party';
+  const photoUrl = first.photoUrl || PHOTO[photoKey];
+  return `
+  <div class="hero-event">
+    <div class="hero-event-photo" style="background-image:url('${photoUrl}')" onclick="toggleGroup(${group.key})">
+      <span class="hero-event-tag">${group.events.length} events</span>
+    </div>
+    <div class="hero-event-body" onclick="toggleGroup(${group.key})">
+      <p class="hero-event-title">${escapeHtml(group.venue)}</p>
+      <p class="hero-event-loc">${group.events.length} events at this venue</p>
+      <p class="hero-event-meta">${isOpen ? 'Tap to collapse ▲' : 'Tap to see all ▼'}</p>
+    </div>
+    ${isOpen ? `<div class="group-expanded">${group.events.map(ev => eventCard(ev, false)).join('')}</div>` : ''}
+  </div>`;
+}
 
 function renderFavorites(){
   const list = document.getElementById('fav-list');
@@ -1132,7 +1181,7 @@ function eventCard(ev, isFav){
   return `
   <div class="hero-event" onclick="openEventSource(${ev.id})">
     <div class="hero-event-photo" style="background-image:url('${photoUrl}')">
-      <span class="hero-event-tag ${ev.hosted ? 'hosted-tag' : ''}">${ev.hosted ? 'Hosted by you' : ev.cat}</span>
+      <span class="hero-event-tag ${ev.hosted ? 'hosted-tag' : (ev.live ? 'live-tag' : '')}">${ev.hosted ? 'Hosted by you' : (ev.live ? 'Live · ' + ev.cat : ev.cat)}</span>
     </div>
     <div class="hero-event-body">
       <p class="hero-event-title">${escapeHtml(ev.title)}</p>
@@ -1389,7 +1438,7 @@ function profileViewHtml(){
     hostSection = `
       <span class="status-pill verified">✓ Verified host</span>
       <button class="primary-btn" style="margin-top:12px" onclick="hostState.view='post'; renderHost();">Post an event</button>
-      ${myHostedEvents.length ? `<div class="section-head"><h2>Your hosted events</h2><span class="count">${myHostedEvents.length}</span></div>` + myHostedEvents.map(ev => eventCard(ev, false)).join('') : ''}
+      ${myHostedEvents.length ? `<div class="section-head"><h2>Your hosted events</h2><span class="count">${myHostedEvents.length}</span></div>` + myHostedEvents.map(hostedEventManageRow).join('') : ''}
     `;
   } else if(status === 'pending'){
     hostSection = `
@@ -1678,6 +1727,34 @@ async function adminDeleteUser(userId, name){
     renderAdminUsers();
   } catch(err){
     showToast("Couldn't delete", err.message);
+  }
+}
+
+function hostedEventManageRow(ev){
+  return `
+  <div class="host-hero" style="margin-bottom:14px">
+    <h3 style="font-size:15px">${escapeHtml(ev.title)}</h3>
+    <p>${escapeHtml(ev.venue)} · ${escapeHtml(ev.date)}</p>
+    <div class="field">
+      <label>Event link</label>
+      <input id="hosted-url-${ev.id}" type="url" placeholder="Link to the original listing" value="${escapeHtml(ev.url || '')}" />
+    </div>
+    <button class="primary-btn" onclick="saveHostedEventLink(${ev.id})">Save link</button>
+  </div>`;
+}
+
+async function saveHostedEventLink(id){
+  const url = document.getElementById('hosted-url-' + id).value.trim();
+  try{
+    const { event } = await apiFetch('/api/events/mine/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ url })
+    });
+    const idx = myHostedEvents.findIndex(e => e.id === id);
+    if(idx !== -1) myHostedEvents[idx] = event;
+    showToast('Saved', 'Event link updated.');
+  } catch(err){
+    showToast("Couldn't save", err.message);
   }
 }
 

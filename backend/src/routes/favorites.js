@@ -1,25 +1,9 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { toApiEvent } = require('../utils/serializeEvent');
 
 const router = express.Router();
-
-function toApiEvent(row) {
-  return {
-    id: row.id,
-    title: row.title,
-    venue: row.venue,
-    cat: row.cat,
-    price: row.price,
-    date: row.date_text,
-    city: row.city,
-    lat: row.lat,
-    lng: row.lng,
-    photoKey: row.photo_key,
-    color: row.color,
-    hosted: row.host_user_id !== null,
-  };
-}
 
 router.get('/', requireAuth, (req, res) => {
   const rows = db

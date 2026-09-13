@@ -43,7 +43,8 @@ db.exec(`
     photo_key     TEXT,
     photo_url     TEXT,                  -- admin-set custom image link (overrides photo_key)
     color         TEXT,
-    source_url    TEXT,                  -- link to the original listing (host-provided)
+    source_url    TEXT,                  -- link to the original listing (host-provided or live-sourced)
+    tm_id         TEXT UNIQUE,           -- Ticketmaster event id, set only for live-sourced rows
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE SET NULL
   );
@@ -69,6 +70,10 @@ if (!eventColumns.includes('source_url')) {
 }
 if (!eventColumns.includes('photo_url')) {
   db.exec('ALTER TABLE events ADD COLUMN photo_url TEXT');
+}
+if (!eventColumns.includes('tm_id')) {
+  db.exec('ALTER TABLE events ADD COLUMN tm_id TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_events_tm_id ON events(tm_id)');
 }
 const userColumns = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
 if (!userColumns.includes('is_admin')) {

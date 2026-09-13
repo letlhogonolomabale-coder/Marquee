@@ -2,6 +2,8 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { geocodeVenue } = require('../utils/geocode');
+const { toApiEvent } = require('../utils/serializeEvent');
+const { fetchLiveEvents } = require('../utils/ticketmaster');
 
 const router = express.Router();
 
@@ -22,38 +24,42 @@ function matchCity(raw) {
   return CITY_ALIASES[q.replace(/\s+/g, '')] || null;
 }
 
-function toApiEvent(row) {
-  return {
-    id: row.id,
-    title: row.title,
-    venue: row.venue,
-    cat: row.cat,
-    price: row.price,
-    date: row.date_text,
-    description: row.description,
-    city: row.city,
-    lat: row.lat,
-    lng: row.lng,
-    photoKey: row.photo_key,
-    photoUrl: row.photo_url,
-    color: row.color,
-    url: row.source_url,
-    hosted: row.host_user_id !== null,
-    hostedByMe: false, // filled in by caller when relevant
-  };
-}
+const upsertLiveEvent = db.prepare(`
+  INSERT INTO events (tm_id, title, venue, cat, price, date_text, description, city, lat, lng, photo_url, color, source_url)
+  VALUES (@tmId, @title, @venue, @cat, @price, @date, @description, @city, @lat, @lng, @photoUrl, '#FFB454', @sourceUrl)
+  ON CONFLICT(tm_id) DO UPDATE SET
+    price = excluded.price,
+    date_text = excluded.date_text,
+    description = excluded.description,
+    photo_url = COALESCE(events.photo_url, excluded.photo_url), -- keep an admin's manual photo override
+    source_url = excluded.source_url
+`);
 
 // GET /api/events?city=Johannesburg
-// This replaces the old client-side "runScan" fake delay + random sample —
-// it now genuinely queries the DB. Add real external sources later by
-// inserting rows from a scraper/API job instead of only from hosts.
-router.get('/', (req, res) => {
+// If TICKETMASTER_API_KEY is set, real live events for the city are pulled
+// in and upserted into the DB (see upsertLiveEvent above), so they get a
+// normal integer id and everything else — favoriting, admin editing — just
+// works on them like any other row. Once real data is available for a city,
+// the old fictional seed listings step aside rather than sit next to it.
+// Without that key, this falls back to the original DB-only behavior.
+router.get('/', async (req, res) => {
   const city = matchCity(req.query.city);
   if (!city) {
     return res.json({ city: null, events: [], message: `No coverage for "${req.query.city}" yet — try Johannesburg, Cape Town, Durban or Pretoria.` });
   }
-  const rows = db.prepare('SELECT * FROM events WHERE city = ? ORDER BY created_at DESC').all(city);
-  res.json({ city, events: rows.map(toApiEvent) });
+
+  const liveRows = await fetchLiveEvents(city);
+  liveRows.forEach((row) => upsertLiveEvent.run(row));
+
+  const dbQuery = liveRows.length > 0 || process.env.TICKETMASTER_API_KEY
+    ? 'SELECT * FROM events WHERE city = ? AND (host_user_id IS NOT NULL OR tm_id IS NOT NULL) ORDER BY (tm_id IS NULL), created_at DESC'
+    : 'SELECT * FROM events WHERE city = ? ORDER BY created_at DESC';
+  const rows = db.prepare(dbQuery).all(city);
+
+  const message = rows.length === 0
+    ? `No live events found for ${city} right now — check back soon.`
+    : undefined;
+  res.json({ city, events: rows.map(toApiEvent), message });
 });
 
 router.get('/:id', (req, res) => {
@@ -111,6 +117,28 @@ router.post('/', requireAuth, async (req, res) => {
 router.get('/mine/hosted', requireAuth, (req, res) => {
   const rows = db.prepare('SELECT * FROM events WHERE host_user_id = ? ORDER BY created_at DESC').all(req.user.id);
   res.json({ events: rows.map(toApiEvent) });
+});
+
+// PATCH /api/events/mine/:id — lets a host add or update the link on an
+// event they posted (e.g. if they skipped it originally, or the listing
+// moved). Scoped to their own events only, and only touches the link —
+// other fields go through the admin panel to avoid two different "edit"
+// paths drifting apart.
+router.patch('/mine/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Event not found.' });
+  if (row.host_user_id !== req.user.id) {
+    return res.status(403).json({ error: "You can only edit events you've posted." });
+  }
+
+  const { url } = req.body;
+  if (url && !/^https?:\/\//i.test(url.trim())) {
+    return res.status(400).json({ error: 'Event link must start with http:// or https://' });
+  }
+
+  db.prepare('UPDATE events SET source_url = ? WHERE id = ?').run(url?.trim() || null, row.id);
+  const updated = db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
+  res.json({ event: toApiEvent(updated) });
 });
 
 // ---- admin-only: full control over price, date and photo for any event ----
