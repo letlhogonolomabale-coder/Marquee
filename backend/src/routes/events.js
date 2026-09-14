@@ -51,13 +51,13 @@ router.get('/', async (req, res) => {
   const liveRows = await fetchLiveEvents(city);
   liveRows.forEach((row) => upsertLiveEvent.run(row));
 
-  // is_main DESC first in every ORDER BY below — the admin-picked featured
-  // event (if any, and if it's in this city) always sorts to row 0, ahead
-  // of the live/soonest ordering that governs everything else.
-  const dbQuery = liveRows.length > 0 || process.env.TICKETMASTER_API_KEY
-    ? 'SELECT * FROM events WHERE city = ? AND (host_user_id IS NOT NULL OR tm_id IS NOT NULL) ORDER BY is_main DESC, (tm_id IS NULL), created_at DESC'
-    : 'SELECT * FROM events WHERE city = ? ORDER BY is_main DESC, created_at DESC';
-  const rows = db.prepare(dbQuery).all(city);
+  // is_main DESC first — the admin-picked (or auto-defaulted) featured
+  // event always sorts to row 0. After that, freshly-pulled live events
+  // sort just ahead of the original demo/editorial listings via
+  // `(tm_id IS NULL)`, but — unlike before — demo events are never hidden
+  // once live data exists for a city; everything for the city shows
+  // together. Admin-hidden events (is_hidden = 1) are left out entirely.
+  const rows = db.prepare('SELECT * FROM events WHERE city = ? AND is_hidden = 0 ORDER BY is_main DESC, (tm_id IS NULL), created_at DESC').all(city);
 
   const message = rows.length === 0
     ? `No live events found for ${city} right now — check back soon.`
@@ -205,22 +205,58 @@ router.post('/admin/:id/main', requireAuth, requireAdmin, (req, res) => {
   res.json({ event: toApiEvent(updated) });
 });
 
-// PATCH /api/events/admin/:id — update price, date and/or photo on any event.
-// Deliberately narrow (not a general-purpose edit endpoint) to match what
-// the admin panel actually exposes.
-router.patch('/admin/:id', requireAuth, requireAdmin, (req, res) => {
+// POST /api/events/admin/:id/visibility — toggle whether this event shows
+// up in the public Discover list. Hiding an event doesn't delete it or
+// touch its main-event status — a hidden event just never appears in the
+// GET / results above, so unhiding it later brings it straight back
+// exactly as it was (including main-event status, if it had it).
+router.post('/admin/:id/visibility', requireAuth, requireAdmin, (req, res) => {
   const row = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Event not found.' });
 
-  const { price, date, photoUrl } = req.body;
+  const hide = !row.is_hidden;
+  db.prepare('UPDATE events SET is_hidden = ? WHERE id = ?').run(hide ? 1 : 0, row.id);
+
+  const updated = db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
+  res.json({ event: toApiEvent(updated) });
+});
+
+// PATCH /api/events/admin/:id — update price, date, photo, website link,
+// venue name and/or location on any event. Deliberately narrow (not a
+// general-purpose edit endpoint) to match what the admin panel exposes.
+// `address`, if given, is re-geocoded the same way a host's own listing
+// is (see PATCH /mine/:id above) so moving an event's pin is just typing
+// a new address rather than hand-editing lat/lng.
+router.patch('/admin/:id', requireAuth, requireAdmin, async (req, res) => {
+  const row = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Event not found.' });
+
+  const { price, date, photoUrl, sourceUrl, venue, address } = req.body;
   if (photoUrl && !/^https?:\/\//i.test(photoUrl.trim())) {
     return res.status(400).json({ error: 'Photo link must start with http:// or https://' });
   }
+  if (sourceUrl && !/^https?:\/\//i.test(sourceUrl.trim())) {
+    return res.status(400).json({ error: 'Event website link must start with http:// or https://' });
+  }
 
-  db.prepare('UPDATE events SET price = ?, date_text = ?, photo_url = ? WHERE id = ?').run(
+  let lat = row.lat;
+  let lng = row.lng;
+  if (address?.trim()) {
+    const coords = await geocodeVenue(venue?.trim() || row.venue, row.city, address.trim());
+    if (coords) {
+      lat = coords.lat;
+      lng = coords.lng;
+    }
+  }
+
+  db.prepare('UPDATE events SET price = ?, date_text = ?, photo_url = ?, source_url = ?, venue = ?, lat = ?, lng = ? WHERE id = ?').run(
     price?.trim() || row.price,
     date?.trim() || row.date_text,
     photoUrl !== undefined ? (photoUrl.trim() || null) : row.photo_url,
+    sourceUrl !== undefined ? (sourceUrl.trim() || null) : row.source_url,
+    venue?.trim() || row.venue,
+    lat,
+    lng,
     row.id
   );
 

@@ -715,20 +715,6 @@
     padding:7px 10px;border-radius:20px;cursor:pointer;
   }
 
-  /* ---- friends-going mock social proof ---- */
-  .friends-going{
-    display:flex;align-items:center;gap:6px;
-    font-size:12px;color:var(--muted);margin-top:6px;
-  }
-  .friend-avatars{display:flex;}
-  .friend-avatar{
-    width:18px;height:18px;border-radius:50%;
-    background:var(--surface-raised);border:1.5px solid var(--surface);
-    display:flex;align-items:center;justify-content:center;
-    font-size:11px;margin-left:-6px;
-  }
-  .friend-avatar:first-child{margin-left:0;}
-
   /* ---- real map embed ---- */
   .map-frame{width:100%;height:280px;border:0;border-radius:14px;display:block;}
 
@@ -1221,11 +1207,10 @@ function eventCard(ev, isFav){
       <p class="hero-event-title">${escapeHtml(ev.title)}</p>
       <p class="hero-event-loc">${escapeHtml(ev.venue)}</p>
       <p class="hero-event-meta">${ev.date}</p>
-      ${friendsBadge(ev.id)}
       <div class="hero-event-bottom">
         <span class="hero-event-price">${ev.price}</span>
         <div class="event-actions">
-          <button class="icon-btn" onclick="event.stopPropagation(); openMap(${ev.id})" title="View on map">🗺️</button>
+          <button class="icon-btn" onclick="event.stopPropagation(); openMap(${ev.id})" title="View on map"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/></svg></button>
           ${isFav ? `<button class="ride-btn" onclick="event.stopPropagation(); openRide(${ev.id})">🚗 Ride</button>` : ''}
           <button class="icon-btn ${starActive}" onclick="event.stopPropagation(); toggleFavorite(${ev.id})" title="Notify me">★</button>
         </div>
@@ -1240,21 +1225,6 @@ function eventCard(ev, isFav){
 // map link) instead of forking a second copy of that logic.
 function featuredEventCard(ev){
   return `<div class="hero-event-main">${eventCard(ev, !!favorites[ev.id])}<span class="hero-event-main-badge">★ Main Event</span></div>`;
-}
-
-// Mock social proof — there's no real friends graph behind this demo, just a
-// stable pseudo-random count derived from the event id so it doesn't flicker
-// between re-renders. Wire this up to real contacts data to make it genuine.
-const FRIEND_EMOJI = ['🧑🏽','🧑🏻','🧑🏾','🧑🏿','🧑🏼'];
-function friendsGoing(id){
-  const seed = (id * 9301 + 49297) % 233280;
-  return Math.floor((seed / 233280) * 6); // 0–5
-}
-function friendsBadge(id){
-  const n = friendsGoing(id);
-  if(n === 0) return '';
-  const avatars = FRIEND_EMOJI.slice(0, Math.min(n, 3)).map(e => `<span class="friend-avatar">${e}</span>`).join('');
-  return `<div class="friends-going"><span class="friend-avatars">${avatars}</span>${n} friend${n > 1 ? 's' : ''} going</div>`;
 }
 
 // Opens the original listing for an event in a new tab. Hosted events carry
@@ -1663,16 +1633,34 @@ async function renderAdminEvents(){
 
 function adminEventRow(ev){
   return `
-  <div class="host-hero" style="margin-bottom:14px${ev.isMain ? ';border-color:var(--amber)' : ''}">
-    <h3 style="font-size:15px">${ev.isMain ? '★ ' : ''}${escapeHtml(ev.title)}</h3>
-    <p>${escapeHtml(ev.venue)} · ${escapeHtml(ev.city)}</p>
+  <div class="host-hero" style="margin-bottom:14px${ev.isMain ? ';border-color:var(--amber)' : ''}${ev.isHidden ? ';opacity:0.55' : ''}">
+    <h3 style="font-size:15px">${ev.isMain ? '★ ' : ''}${ev.isHidden ? '🙈 ' : ''}${escapeHtml(ev.title)}</h3>
+    <p>${escapeHtml(ev.venue)} · ${escapeHtml(ev.city)}${ev.isHidden ? ' · Hidden from Discover' : ''}</p>
     <div class="field"><label>Price</label><input id="admin-price-${ev.id}" type="text" value="${escapeHtml(ev.price)}" /></div>
     <div class="field"><label>Date & time</label><input id="admin-date-${ev.id}" type="text" value="${escapeHtml(ev.date)}" /></div>
     <div class="field"><label>Photo link</label><input id="admin-photo-${ev.id}" type="url" placeholder="https://..." value="${escapeHtml(ev.photoUrl || '')}" /></div>
+    <div class="field"><label>Event website link</label><input id="admin-url-${ev.id}" type="url" placeholder="https://..." value="${escapeHtml(ev.url || '')}" /></div>
+    <div class="field"><label>Venue name</label><input id="admin-venue-${ev.id}" type="text" value="${escapeHtml(ev.venue)}" /></div>
+    <div class="field"><label>Location / address (moves the map pin)</label><input id="admin-address-${ev.id}" type="text" placeholder="e.g. 44 Stanley Ave, Milpark, Johannesburg" /></div>
     <button class="primary-btn" onclick="saveAdminEvent(${ev.id})">Save</button>
     <button class="link-btn" style="display:block;margin-top:10px${ev.isMain ? ';color:var(--amber)' : ''}" onclick="adminSetMain(${ev.id})">${ev.isMain ? '★ Main event — tap to remove' : '☆ Set as main event'}</button>
+    <button class="link-btn" style="display:block;margin-top:10px${ev.isHidden ? ';color:var(--danger)' : ''}" onclick="adminSetVisibility(${ev.id})">${ev.isHidden ? '🙈 Hidden — tap to show in Discover' : '👁 Visible — tap to hide from Discover'}</button>
     <button class="link-btn" style="display:block;margin-top:10px" onclick="makeEventPermanent(${ev.id})">Make a permanent part of the app →</button>
   </div>`;
+}
+
+// Hiding an event just keeps it out of the public Discover list — it's
+// still here in the admin panel (dimmed, with a note), still editable,
+// and picks up exactly where it left off (including main-event status)
+// the moment it's unhidden.
+async function adminSetVisibility(id){
+  try{
+    const { event } = await apiFetch('/api/events/admin/' + id + '/visibility', { method: 'POST' });
+    showToast(event.isHidden ? 'Event hidden' : 'Event visible', event.isHidden ? `"${event.title}" no longer shows in Discover.` : `"${event.title}" is back in Discover.`);
+    await renderAdminEvents();
+  } catch(err){
+    showToast("Couldn't update", err.message);
+  }
 }
 
 // Only one event can be "main" (featured, highlighted, pinned to the top
@@ -1734,10 +1722,13 @@ async function saveAdminEvent(id){
   const price = document.getElementById('admin-price-' + id).value.trim();
   const date = document.getElementById('admin-date-' + id).value.trim();
   const photoUrl = document.getElementById('admin-photo-' + id).value.trim();
+  const sourceUrl = document.getElementById('admin-url-' + id).value.trim();
+  const venue = document.getElementById('admin-venue-' + id).value.trim();
+  const address = document.getElementById('admin-address-' + id).value.trim();
   try{
     await apiFetch('/api/events/admin/' + id, {
       method: 'PATCH',
-      body: JSON.stringify({ price, date, photoUrl })
+      body: JSON.stringify({ price, date, photoUrl, sourceUrl, venue, address })
     });
     showToast('Saved', 'Event updated.');
     // Re-run the Discover search so the card reflects the edit immediately.

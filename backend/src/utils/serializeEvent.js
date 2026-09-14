@@ -22,6 +22,7 @@ function toApiEvent(row) {
     hosted: row.host_user_id !== null,
     live: row.tm_id !== null,
     isMain: !!row.is_main,
+    isHidden: !!row.is_hidden,
   };
 }
 

@@ -46,6 +46,7 @@ db.exec(`
     source_url    TEXT,                  -- link to the original listing (host-provided or live-sourced)
     tm_id         TEXT UNIQUE,           -- Ticketmaster event id, set only for live-sourced rows
     is_main       INTEGER NOT NULL DEFAULT 0, -- admin-picked featured event; at most one row is 1
+    is_hidden     INTEGER NOT NULL DEFAULT 0, -- admin-hidden event; excluded from the public Discover list
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE SET NULL
   );
@@ -79,6 +80,9 @@ if (!eventColumns.includes('tm_id')) {
 if (!eventColumns.includes('is_main')) {
   db.exec('ALTER TABLE events ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0');
 }
+if (!eventColumns.includes('is_hidden')) {
+  db.exec('ALTER TABLE events ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0');
+}
 const userColumns = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
 if (!userColumns.includes('is_admin')) {
   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
@@ -93,8 +97,8 @@ if (!userColumns.includes('is_admin')) {
 // the app (price/date/photo) are never stomped on redeploy.
 const seed = require('./seedEvents');
 const insert = db.prepare(`
-    INSERT INTO events (title, venue, cat, price, date_text, description, city, lat, lng, photo_key, photo_url, color, source_url)
-    VALUES (@title, @venue, @cat, @price, @date_text, @description, @city, @lat, @lng, @photo_key, @photo_url, @color, @source_url)
+    INSERT INTO events (title, venue, cat, price, date_text, description, city, lat, lng, photo_key, photo_url, color, source_url, is_main)
+    VALUES (@title, @venue, @cat, @price, @date_text, @description, @city, @lat, @lng, @photo_key, @photo_url, @color, @source_url, @is_main)
   `);
 const findExisting = db.prepare(`
     SELECT 1 FROM events
@@ -103,17 +107,38 @@ const findExisting = db.prepare(`
       AND city = @city
     LIMIT 1
   `);
+const unsetCityMain = db.prepare('UPDATE events SET is_main = 0 WHERE is_main = 1 AND city = ?');
 // Fill in optional fields the older, simpler seed rows don't have — lets
 // an admin "promoted" event (with a real photo/link) sit in the same file
 // as the original editorial listings without needing to touch every row.
-const withDefaults = (r) => ({ description: null, photo_key: null, photo_url: null, source_url: null, ...r });
+const withDefaults = (r) => ({ description: null, photo_key: null, photo_url: null, source_url: null, is_main: false, ...r });
 const insertMissing = db.transaction((rows) => {
   let added = 0;
   rows.forEach((r) => {
     const row = withDefaults(r);
-    if (!findExisting.get(row)) {
-      insert.run(row);
+    const existing = findExisting.get(row);
+    if (!existing) {
+      // `is_main: true` in seedEvents.js only takes effect the moment this
+      // row is first created — it picks that city's main event once, the
+      // same way an admin's manual pick would, and an admin is free to
+      // change it afterwards through the app without a later redeploy
+      // ever snapping it back (this insert never runs again for a row
+      // that already exists).
+      if (row.is_main) unsetCityMain.run(row.city);
+      insert.run({ ...row, is_main: row.is_main ? 1 : 0 });
       added++;
+    } else if (row.is_main) {
+      // Row already exists (e.g. it was added to the DB before is_main
+      // seeding existed) — back-fill the pick, but only if nobody in this
+      // city is currently marked main at all, so a deliberate admin
+      // choice is never overwritten by a later redeploy.
+      const cityHasMain = db.prepare('SELECT 1 FROM events WHERE city = ? AND is_main = 1 LIMIT 1').get(row.city);
+      if (!cityHasMain) {
+        db.prepare(`
+          UPDATE events SET is_main = 1
+          WHERE lower(trim(title)) = lower(trim(@title)) AND lower(trim(venue)) = lower(trim(@venue)) AND city = @city
+        `).run(row);
+      }
     }
   });
   return added;
