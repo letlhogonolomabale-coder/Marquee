@@ -51,15 +51,29 @@ router.get('/', async (req, res) => {
   const liveRows = await fetchLiveEvents(city);
   liveRows.forEach((row) => upsertLiveEvent.run(row));
 
+  // is_main DESC first in every ORDER BY below — the admin-picked featured
+  // event (if any, and if it's in this city) always sorts to row 0, ahead
+  // of the live/soonest ordering that governs everything else.
   const dbQuery = liveRows.length > 0 || process.env.TICKETMASTER_API_KEY
-    ? 'SELECT * FROM events WHERE city = ? AND (host_user_id IS NOT NULL OR tm_id IS NOT NULL) ORDER BY (tm_id IS NULL), created_at DESC'
-    : 'SELECT * FROM events WHERE city = ? ORDER BY created_at DESC';
+    ? 'SELECT * FROM events WHERE city = ? AND (host_user_id IS NOT NULL OR tm_id IS NOT NULL) ORDER BY is_main DESC, (tm_id IS NULL), created_at DESC'
+    : 'SELECT * FROM events WHERE city = ? ORDER BY is_main DESC, created_at DESC';
   const rows = db.prepare(dbQuery).all(city);
 
   const message = rows.length === 0
     ? `No live events found for ${city} right now — check back soon.`
     : undefined;
-  res.json({ city, events: rows.map(toApiEvent), message });
+
+  // Every city always has a main event once it has any events at all: if
+  // the admin hasn't picked one for this city, the soonest row (rows[0] —
+  // already first because of the is_main DESC ordering above) is treated
+  // as main automatically. This is display-only and never written to the
+  // DB, so it changes on its own as events come and go until an admin
+  // makes an explicit pick, which always wins from then on.
+  const adminPickId = rows.find((r) => r.is_main)?.id ?? null;
+  const effectiveMainId = adminPickId ?? rows[0]?.id ?? null;
+  const events = rows.map((r) => ({ ...toApiEvent(r), isMain: r.id === effectiveMainId }));
+
+  res.json({ city, events, message });
 });
 
 router.get('/:id', (req, res) => {
@@ -163,8 +177,32 @@ router.patch('/mine/:id', requireAuth, async (req, res) => {
 
 // GET /api/events/admin/all — every event, across every city, for the admin panel.
 router.get('/admin/all', requireAuth, requireAdmin, (req, res) => {
-  const rows = db.prepare('SELECT * FROM events ORDER BY created_at DESC').all();
+  const rows = db.prepare('SELECT * FROM events ORDER BY is_main DESC, created_at DESC').all();
   res.json({ events: rows.map(toApiEvent) });
+});
+
+// POST /api/events/admin/:id/main — toggle this event as the main/featured
+// event FOR ITS CITY. Every city always shows a main event (falling back
+// automatically to the soonest one — see GET / above) until an admin picks
+// one explicitly; picking a new one here only replaces the previous
+// explicit pick in that same city, leaving every other city untouched.
+// Calling this again on the event that's already main un-sets it, handing
+// that city back to the automatic soonest-event default.
+router.post('/admin/:id/main', requireAuth, requireAdmin, (req, res) => {
+  const row = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Event not found.' });
+
+  const makeMain = !row.is_main;
+  const setMain = db.transaction(() => {
+    db.prepare('UPDATE events SET is_main = 0 WHERE is_main = 1 AND city = ?').run(row.city);
+    if (makeMain) {
+      db.prepare('UPDATE events SET is_main = 1 WHERE id = ?').run(row.id);
+    }
+  });
+  setMain();
+
+  const updated = db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
+  res.json({ event: toApiEvent(updated) });
 });
 
 // PATCH /api/events/admin/:id — update price, date and/or photo on any event.

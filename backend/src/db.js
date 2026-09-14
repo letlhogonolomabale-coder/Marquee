@@ -45,6 +45,7 @@ db.exec(`
     color         TEXT,
     source_url    TEXT,                  -- link to the original listing (host-provided or live-sourced)
     tm_id         TEXT UNIQUE,           -- Ticketmaster event id, set only for live-sourced rows
+    is_main       INTEGER NOT NULL DEFAULT 0, -- admin-picked featured event; at most one row is 1
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE SET NULL
   );
@@ -75,6 +76,9 @@ if (!eventColumns.includes('tm_id')) {
   db.exec('ALTER TABLE events ADD COLUMN tm_id TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_events_tm_id ON events(tm_id)');
 }
+if (!eventColumns.includes('is_main')) {
+  db.exec('ALTER TABLE events ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0');
+}
 const userColumns = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
 if (!userColumns.includes('is_admin')) {
   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
@@ -86,10 +90,14 @@ const seedCount = db.prepare('SELECT COUNT(*) AS n FROM events').get().n;
 if (seedCount === 0) {
   const seed = require('./seedEvents');
   const insert = db.prepare(`
-    INSERT INTO events (title, venue, cat, price, date_text, city, lat, lng, photo_key, color)
-    VALUES (@title, @venue, @cat, @price, @date_text, @city, @lat, @lng, @photo_key, @color)
+    INSERT INTO events (title, venue, cat, price, date_text, description, city, lat, lng, photo_key, photo_url, color, source_url)
+    VALUES (@title, @venue, @cat, @price, @date_text, @description, @city, @lat, @lng, @photo_key, @photo_url, @color, @source_url)
   `);
-  const insertMany = db.transaction((rows) => rows.forEach((r) => insert.run(r)));
+  // Fill in optional fields the older, simpler seed rows don't have — lets
+  // an admin "promoted" event (with a real photo/link) sit in the same file
+  // as the original editorial listings without needing to touch every row.
+  const withDefaults = (r) => ({ description: null, photo_key: null, photo_url: null, source_url: null, ...r });
+  const insertMany = db.transaction((rows) => rows.forEach((r) => insert.run(withDefaults(r))));
   insertMany(seed);
   console.log(`Seeded ${seed.length} events.`);
 }

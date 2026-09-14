@@ -455,6 +455,34 @@
   .hero-event-bottom{display:flex;align-items:center;justify-content:space-between;gap:10px;}
   .hero-event-price{font-size:13px;color:var(--text);font-weight:600;}
 
+  /* ---- main/featured event — the one admin-picked highlight, always first ---- */
+  .hero-event-main{
+    position:relative;
+    border-radius:20px;
+    margin-bottom:20px;
+    padding:2px; /* reveals the gradient ring below as a border */
+    background:linear-gradient(120deg, var(--amber) 0%, var(--magenta) 50%, var(--violet) 100%);
+    box-shadow:0 8px 28px rgba(var(--magenta-rgb),0.22);
+  }
+  .hero-event-main .hero-event{
+    margin-bottom:0;
+    border:none;
+    border-radius:18px;
+  }
+  .hero-event-main .hero-event-photo{height:220px;}
+  .hero-event-main .hero-event-title{font-size:22px;}
+  .hero-event-main .hero-event-loc{font-size:14px;}
+  .hero-event-main .hero-event-price{font-size:14px;}
+  .hero-event-main-badge{
+    position:absolute;top:12px;right:12px;z-index:2;
+    display:inline-flex;align-items:center;gap:5px;
+    background:linear-gradient(120deg, var(--amber) 0%, var(--magenta) 50%, var(--violet) 100%);
+    color:var(--ink);
+    font-size:11px;font-weight:800;letter-spacing:0.02em;
+    padding:5px 10px;border-radius:20px;
+    white-space:nowrap;
+  }
+
   /* ---- past events ---- */
   .past-card{
     position:relative;
@@ -1099,7 +1127,12 @@ function renderFound(){
     </select>
   `;
 
+  // The admin's featured pick, if this city has one — pulled out and shown
+  // as its own bigger banner above the regular list, and left out of the
+  // regular list below so it doesn't also show up a second time.
+  const mainEvent = foundEvents.find(e => e.isMain);
   let shown = activeCategory === 'All' ? [...foundEvents] : foundEvents.filter(e => e.cat === activeCategory);
+  if(mainEvent) shown = shown.filter(e => e.id !== mainEvent.id);
 
   if(sortMode === 'cheapest') shown.sort((a,b) => parsePrice(a.price) - parsePrice(b.price));
   else if(userVibes.size){
@@ -1108,11 +1141,12 @@ function renderFound(){
     shown.sort((a,b) => (userVibes.has(b.cat) ? 1 : 0) - (userVibes.has(a.cat) ? 1 : 0));
   }
 
+  const mainHtml = mainEvent ? featuredEventCard(mainEvent) : '';
   if(shown.length === 0){
-    list.innerHTML = `<div class="empty">No ${escapeHtml(activeCategory.toLowerCase())} events in this batch — try another category.</div>`;
+    list.innerHTML = mainHtml || `<div class="empty">No ${escapeHtml(activeCategory.toLowerCase())} events in this batch — try another category.</div>`;
     return;
   }
-  list.innerHTML = groupEventsByVenue(shown).map(item => item.isGroup ? groupedEventCard(item) : eventCard(item, false)).join('');
+  list.innerHTML = mainHtml + groupEventsByVenue(shown).map(item => item.isGroup ? groupedEventCard(item) : eventCard(item, false)).join('');
 }
 function setCategory(c){ activeCategory = c; renderFound(); }
 function setSort(v){ sortMode = v; renderFound(); }
@@ -1198,6 +1232,14 @@ function eventCard(ev, isFav){
       </div>
     </div>
   </div>`;
+}
+
+// The admin-picked featured event — same card markup as eventCard, just
+// wrapped in the gradient "main event" frame and tagged, so it stays in
+// sync with everything eventCard already does (favoriting, ride button,
+// map link) instead of forking a second copy of that logic.
+function featuredEventCard(ev){
+  return `<div class="hero-event-main">${eventCard(ev, !!favorites[ev.id])}<span class="hero-event-main-badge">★ Main Event</span></div>`;
 }
 
 // Mock social proof — there's no real friends graph behind this demo, just a
@@ -1612,7 +1654,8 @@ async function renderAdminEvents(){
   try{
     const { events } = await apiFetch('/api/events/admin/all');
     adminEvents = events;
-    c.innerHTML = adminEvents.map(adminEventRow).join('') || '<p class="hint">No events yet.</p>';
+    const hint = '<p class="hint" style="margin-bottom:12px">Every city always shows a main event at the top of Discover — if you haven\'t picked one below, the soonest event in that city is used automatically until you do.</p>';
+    c.innerHTML = hint + (adminEvents.map(adminEventRow).join('') || '<p class="hint">No events yet.</p>');
   } catch(err){
     c.innerHTML = `<p class="hint">Couldn't load events — ${escapeHtml(err.message)}</p>`;
   }
@@ -1620,14 +1663,71 @@ async function renderAdminEvents(){
 
 function adminEventRow(ev){
   return `
-  <div class="host-hero" style="margin-bottom:14px">
-    <h3 style="font-size:15px">${escapeHtml(ev.title)}</h3>
+  <div class="host-hero" style="margin-bottom:14px${ev.isMain ? ';border-color:var(--amber)' : ''}">
+    <h3 style="font-size:15px">${ev.isMain ? '★ ' : ''}${escapeHtml(ev.title)}</h3>
     <p>${escapeHtml(ev.venue)} · ${escapeHtml(ev.city)}</p>
     <div class="field"><label>Price</label><input id="admin-price-${ev.id}" type="text" value="${escapeHtml(ev.price)}" /></div>
     <div class="field"><label>Date & time</label><input id="admin-date-${ev.id}" type="text" value="${escapeHtml(ev.date)}" /></div>
     <div class="field"><label>Photo link</label><input id="admin-photo-${ev.id}" type="url" placeholder="https://..." value="${escapeHtml(ev.photoUrl || '')}" /></div>
     <button class="primary-btn" onclick="saveAdminEvent(${ev.id})">Save</button>
+    <button class="link-btn" style="display:block;margin-top:10px${ev.isMain ? ';color:var(--amber)' : ''}" onclick="adminSetMain(${ev.id})">${ev.isMain ? '★ Main event — tap to remove' : '☆ Set as main event'}</button>
+    <button class="link-btn" style="display:block;margin-top:10px" onclick="makeEventPermanent(${ev.id})">Make a permanent part of the app →</button>
   </div>`;
+}
+
+// Only one event can be "main" (featured, highlighted, pinned to the top
+// of Discover) at a time — picking a new one automatically un-picks
+// whichever one had it before, so admins never need to remember to clear
+// the old one first.
+async function adminSetMain(id){
+  try{
+    const { event } = await apiFetch('/api/events/admin/' + id + '/main', { method: 'POST' });
+    showToast(event.isMain ? 'Set as main event' : 'Main event removed', event.isMain ? `"${event.title}" now leads Discover.` : `"${event.title}" is no longer featured.`);
+    await renderAdminEvents();
+  } catch(err){
+    showToast("Couldn't update", err.message);
+  }
+}
+
+// Generates the exact line to paste into backend/src/seedEvents.js. Once
+// it's in that file and pushed, the event gets re-created on every fresh
+// deploy (same mechanism as the original editorial listings) — genuinely
+// permanent, no database persistence or paid disk required.
+function eventToSeedSnippet(ev){
+  const j = (v) => JSON.stringify(v ?? null);
+  return `  { title: ${j(ev.title)}, venue: ${j(ev.venue)}, cat: ${j(ev.cat)}, price: ${j(ev.price)}, date_text: ${j(ev.date)}, city: ${j(ev.city)}, lat: ${ev.lat ?? 'null'}, lng: ${ev.lng ?? 'null'}, photo_key: ${j(ev.photoKey)}, photo_url: ${j(ev.photoUrl)}, color: ${j(ev.color || '#FFB454')}, description: ${j(ev.description)}, source_url: ${j(ev.url)} },`;
+}
+
+function makeEventPermanent(id){
+  const ev = adminEvents.find(e => e.id === id);
+  if(!ev) return;
+  // Use whatever's currently in the price/date/photo fields, in case there
+  // are unsaved edits — the snippet should reflect what's on screen.
+  const price = document.getElementById('admin-price-' + id)?.value.trim() || ev.price;
+  const date = document.getElementById('admin-date-' + id)?.value.trim() || ev.date;
+  const photoUrl = document.getElementById('admin-photo-' + id)?.value.trim() || ev.photoUrl;
+  const snippet = eventToSeedSnippet({ ...ev, price, date, photoUrl });
+
+  document.getElementById('sheet-content').innerHTML = `
+    <div class="sheet-head">
+      <h3>Make "${escapeHtml(ev.title)}" permanent</h3>
+      <button class="sheet-close" onclick="closeSheet()">×</button>
+    </div>
+    <p class="hint" style="margin-bottom:10px">Copy this line into <code>backend/src/seedEvents.js</code> (anywhere inside the array), then commit and push as usual. Once it's in that file, this event survives every redeploy — no paid disk needed.</p>
+    <textarea readonly style="width:100%;min-height:160px;font-family:monospace;font-size:11.5px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--surface-raised);color:var(--text)" onclick="this.select()">${escapeHtml(snippet)}</textarea>
+    <button class="primary-btn" style="margin-top:10px" onclick="copySeedSnippet(this)">Copy to clipboard</button>
+  `;
+  document.getElementById('overlay').classList.add('open');
+}
+
+async function copySeedSnippet(btn){
+  const text = btn.previousElementSibling.value;
+  try{
+    await navigator.clipboard.writeText(text);
+    showToast('Copied', 'Paste it into seedEvents.js.');
+  } catch(err){
+    showToast('Tap the text box to select it', 'Then copy manually — clipboard access was blocked.');
+  }
 }
 
 async function saveAdminEvent(id){

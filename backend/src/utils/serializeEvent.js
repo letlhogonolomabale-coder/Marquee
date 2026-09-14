@@ -21,6 +21,7 @@ function toApiEvent(row) {
     url: row.source_url,
     hosted: row.host_user_id !== null,
     live: row.tm_id !== null,
+    isMain: !!row.is_main,
   };
 }
 
