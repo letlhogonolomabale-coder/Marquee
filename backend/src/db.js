@@ -84,22 +84,41 @@ if (!userColumns.includes('is_admin')) {
   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
 }
 
-// ---- one-time seed, so /api/events returns real rows on a fresh DB ----
-// This is the same data that used to live in the frontend's EVENT_POOL array.
-const seedCount = db.prepare('SELECT COUNT(*) AS n FROM events').get().n;
-if (seedCount === 0) {
-  const seed = require('./seedEvents');
-  const insert = db.prepare(`
+// ---- seed sync, so /api/events returns real rows on a fresh DB, and any
+// new listing added to seedEvents.js later (e.g. via the admin panel's
+// "make permanent" flow, or by hand) actually shows up on the next deploy
+// too — not just on a brand-new database. Runs on every startup, but only
+// INSERTs rows that aren't already there (matched by title+venue+city);
+// it never touches or overwrites an existing row, so admin edits made via
+// the app (price/date/photo) are never stomped on redeploy.
+const seed = require('./seedEvents');
+const insert = db.prepare(`
     INSERT INTO events (title, venue, cat, price, date_text, description, city, lat, lng, photo_key, photo_url, color, source_url)
     VALUES (@title, @venue, @cat, @price, @date_text, @description, @city, @lat, @lng, @photo_key, @photo_url, @color, @source_url)
   `);
-  // Fill in optional fields the older, simpler seed rows don't have — lets
-  // an admin "promoted" event (with a real photo/link) sit in the same file
-  // as the original editorial listings without needing to touch every row.
-  const withDefaults = (r) => ({ description: null, photo_key: null, photo_url: null, source_url: null, ...r });
-  const insertMany = db.transaction((rows) => rows.forEach((r) => insert.run(withDefaults(r))));
-  insertMany(seed);
-  console.log(`Seeded ${seed.length} events.`);
-}
+const findExisting = db.prepare(`
+    SELECT 1 FROM events
+    WHERE lower(trim(title)) = lower(trim(@title))
+      AND lower(trim(venue)) = lower(trim(@venue))
+      AND city = @city
+    LIMIT 1
+  `);
+// Fill in optional fields the older, simpler seed rows don't have — lets
+// an admin "promoted" event (with a real photo/link) sit in the same file
+// as the original editorial listings without needing to touch every row.
+const withDefaults = (r) => ({ description: null, photo_key: null, photo_url: null, source_url: null, ...r });
+const insertMissing = db.transaction((rows) => {
+  let added = 0;
+  rows.forEach((r) => {
+    const row = withDefaults(r);
+    if (!findExisting.get(row)) {
+      insert.run(row);
+      added++;
+    }
+  });
+  return added;
+});
+const addedCount = insertMissing(seed);
+if (addedCount > 0) console.log(`Seeded ${addedCount} new event(s) from seedEvents.js.`);
 
 module.exports = db;
