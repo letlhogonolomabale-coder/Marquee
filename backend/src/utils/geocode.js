@@ -10,8 +10,8 @@
 
 const fetch = require('node-fetch');
 
-async function geocodeVenue(venue, city) {
-  const query = encodeURIComponent(`${venue}, ${city}, South Africa`);
+async function geocodeVenue(venue, city, address) {
+  const query = encodeURIComponent(address ? `${address}, ${city}, South Africa` : `${venue}, ${city}, South Africa`);
   const url = `https://nominatim.openstreetmap.org/search?q=${query}&format=json&limit=1`;
 
   try {

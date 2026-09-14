@@ -1416,6 +1416,7 @@ function renderHost(){
       </div>
       <div class="field"><label>City</label><select id="ev-city">${cityOptions}</select></div>
       <div class="field"><label>Venue</label><input id="ev-venue" type="text" placeholder="Where's it happening?" /></div>
+      <div class="field"><label>Address</label><input id="ev-address" type="text" placeholder="Street address — helps the map pin land in the right spot" /></div>
       <div class="field"><label>Date & time</label><input id="ev-date" type="text" placeholder="e.g. Sat, 20 Sep · 7:00 PM" /></div>
       <div class="field"><label>Price</label><input id="ev-price" type="text" placeholder="e.g. Free, or From R150" /></div>
       <div class="field"><label>Description</label><textarea id="ev-desc" placeholder="What should people know before they come?"></textarea></div>
@@ -1739,20 +1740,25 @@ function hostedEventManageRow(ev){
       <label>Event link</label>
       <input id="hosted-url-${ev.id}" type="url" placeholder="Link to the original listing" value="${escapeHtml(ev.url || '')}" />
     </div>
-    <button class="primary-btn" onclick="saveHostedEventLink(${ev.id})">Save link</button>
+    <div class="field">
+      <label>Address ${ev.lat ? '(pin is set — enter a new one to move it)' : '(no map pin yet)'}</label>
+      <input id="hosted-address-${ev.id}" type="text" placeholder="Street address, for a more accurate map pin" />
+    </div>
+    <button class="primary-btn" onclick="saveHostedEventLink(${ev.id})">Save</button>
   </div>`;
 }
 
 async function saveHostedEventLink(id){
   const url = document.getElementById('hosted-url-' + id).value.trim();
+  const address = document.getElementById('hosted-address-' + id).value.trim();
   try{
     const { event } = await apiFetch('/api/events/mine/' + id, {
       method: 'PATCH',
-      body: JSON.stringify({ url })
+      body: JSON.stringify({ url, address })
     });
     const idx = myHostedEvents.findIndex(e => e.id === id);
     if(idx !== -1) myHostedEvents[idx] = event;
-    showToast('Saved', 'Event link updated.');
+    showToast('Saved', address ? 'Event updated and map pin refreshed.' : 'Event link updated.');
   } catch(err){
     showToast("Couldn't save", err.message);
   }
@@ -1761,6 +1767,7 @@ async function saveHostedEventLink(id){
 async function submitHostedEvent(){
   const title = document.getElementById('ev-title').value.trim();
   const venue = document.getElementById('ev-venue').value.trim();
+  const address = document.getElementById('ev-address').value.trim();
   const date = document.getElementById('ev-date').value.trim();
   const cat = document.getElementById('ev-cat').value;
   const city = document.getElementById('ev-city').value;
@@ -1774,7 +1781,7 @@ async function submitHostedEvent(){
   try{
     const { event } = await apiFetch('/api/events', {
       method: 'POST',
-      body: JSON.stringify({ title, venue, date, cat, city, price, description, url })
+      body: JSON.stringify({ title, venue, date, cat, city, price, description, url, address })
     });
     myHostedEvents.unshift(event);
     if(city === lastCity) foundEvents.unshift(event);

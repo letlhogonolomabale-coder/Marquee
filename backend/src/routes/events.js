@@ -75,7 +75,7 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'You need to complete ID verification before posting events.' });
   }
 
-  const { title, venue, cat, price, date, description, city, url } = req.body;
+  const { title, venue, cat, price, date, description, city, url, address } = req.body;
   if (!title || !venue || !date) {
     return res.status(400).json({ error: 'Title, venue and date are required.' });
   }
@@ -86,8 +86,11 @@ router.post('/', requireAuth, async (req, res) => {
 
   // Best-effort real geocoding — falls back to null lat/lng (frontend
   // already handles "no pin for this one" gracefully) rather than silently
-  // defaulting to the city center like the original prototype did.
-  const coords = await geocodeVenue(venue, resolvedCity);
+  // defaulting to the city center like the original prototype did. An
+  // explicit street address (when the host gives one) geocodes far more
+  // reliably than a bare venue name, which is often too informal/generic
+  // for Nominatim to resolve on its own (e.g. "Rooftop bar downtown").
+  const coords = await geocodeVenue(venue, resolvedCity, address?.trim());
 
   const result = db
     .prepare(`
@@ -124,19 +127,34 @@ router.get('/mine/hosted', requireAuth, (req, res) => {
 // moved). Scoped to their own events only, and only touches the link —
 // other fields go through the admin panel to avoid two different "edit"
 // paths drifting apart.
-router.patch('/mine/:id', requireAuth, (req, res) => {
+router.patch('/mine/:id', requireAuth, async (req, res) => {
   const row = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Event not found.' });
   if (row.host_user_id !== req.user.id) {
     return res.status(403).json({ error: "You can only edit events you've posted." });
   }
 
-  const { url } = req.body;
+  const { url, address } = req.body;
   if (url && !/^https?:\/\//i.test(url.trim())) {
     return res.status(400).json({ error: 'Event link must start with http:// or https://' });
   }
 
-  db.prepare('UPDATE events SET source_url = ? WHERE id = ?').run(url?.trim() || null, row.id);
+  let lat = row.lat;
+  let lng = row.lng;
+  if (address?.trim()) {
+    const coords = await geocodeVenue(row.venue, row.city, address.trim());
+    if (coords) {
+      lat = coords.lat;
+      lng = coords.lng;
+    }
+  }
+
+  db.prepare('UPDATE events SET source_url = ?, lat = ?, lng = ? WHERE id = ?').run(
+    url?.trim() || null,
+    lat,
+    lng,
+    row.id
+  );
   const updated = db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
   res.json({ event: toApiEvent(updated) });
 });
