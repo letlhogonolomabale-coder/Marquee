@@ -4,6 +4,7 @@ const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { geocodeVenue } = require('../utils/geocode');
 const { toApiEvent } = require('../utils/serializeEvent');
 const { fetchLiveEvents } = require('../utils/ticketmaster');
+const { parseEventDateText } = require('../utils/eventDate');
 
 const router = express.Router();
 
@@ -25,11 +26,12 @@ function matchCity(raw) {
 }
 
 const upsertLiveEvent = db.prepare(`
-  INSERT INTO events (tm_id, title, venue, cat, price, date_text, description, city, lat, lng, photo_url, color, source_url)
-  VALUES (@tmId, @title, @venue, @cat, @price, @date, @description, @city, @lat, @lng, @photoUrl, '#FFB454', @sourceUrl)
+  INSERT INTO events (tm_id, title, venue, cat, price, date_text, event_date, description, city, lat, lng, photo_url, color, source_url)
+  VALUES (@tmId, @title, @venue, @cat, @price, @date, @eventDate, @description, @city, @lat, @lng, @photoUrl, '#FFB454', @sourceUrl)
   ON CONFLICT(tm_id) DO UPDATE SET
     price = excluded.price,
     date_text = excluded.date_text,
+    event_date = excluded.event_date,
     description = excluded.description,
     photo_url = COALESCE(events.photo_url, excluded.photo_url), -- keep an admin's manual photo override
     source_url = excluded.source_url
@@ -56,8 +58,15 @@ router.get('/', async (req, res) => {
   // sort just ahead of the original demo/editorial listings via
   // `(tm_id IS NULL)`, but — unlike before — demo events are never hidden
   // once live data exists for a city; everything for the city shows
-  // together. Admin-hidden events (is_hidden = 1) are left out entirely.
-  const rows = db.prepare('SELECT * FROM events WHERE city = ? AND is_hidden = 0 ORDER BY is_main DESC, (tm_id IS NULL), created_at DESC').all(city);
+  // together. Admin-hidden events (is_hidden = 1) are left out entirely,
+  // and so is anything whose date has already passed — those move to
+  // GET /past instead (see below). An event with no parseable event_date
+  // is treated as always-upcoming rather than guessed into either bucket.
+  const rows = db.prepare(`
+    SELECT * FROM events
+    WHERE city = ? AND is_hidden = 0 AND (event_date IS NULL OR event_date >= datetime('now'))
+    ORDER BY is_main DESC, (tm_id IS NULL), created_at DESC
+  `).all(city);
 
   const message = rows.length === 0
     ? `No live events found for ${city} right now — check back soon.`
@@ -74,6 +83,25 @@ router.get('/', async (req, res) => {
   const events = rows.map((r) => ({ ...toApiEvent(r), isMain: r.id === effectiveMainId }));
 
   res.json({ city, events, message });
+});
+
+// GET /api/events/past?city=Johannesburg — events for this city whose
+// event_date has already gone by, most-recently-past first. Feeds the
+// Past page. An event with no parseable event_date never appears here
+// (see GET / above) since we can't know it's actually over.
+router.get('/past', (req, res) => {
+  const city = matchCity(req.query.city);
+  if (!city) {
+    return res.json({ city: null, events: [], message: `No coverage for "${req.query.city}" yet — try Johannesburg, Cape Town, Durban or Pretoria.` });
+  }
+
+  const rows = db.prepare(`
+    SELECT * FROM events
+    WHERE city = ? AND is_hidden = 0 AND event_date IS NOT NULL AND event_date < datetime('now')
+    ORDER BY event_date DESC
+  `).all(city);
+
+  res.json({ city, events: rows.map(toApiEvent) });
 });
 
 router.get('/:id', (req, res) => {
@@ -108,8 +136,8 @@ router.post('/', requireAuth, async (req, res) => {
 
   const result = db
     .prepare(`
-      INSERT INTO events (host_user_id, title, venue, cat, price, date_text, description, city, lat, lng, color, source_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (host_user_id, title, venue, cat, price, date_text, event_date, description, city, lat, lng, color, source_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       user.id,
@@ -118,6 +146,7 @@ router.post('/', requireAuth, async (req, res) => {
       cat || 'Music',
       price?.trim() || 'Free',
       date.trim(),
+      parseEventDateText(date.trim())?.toISOString() ?? null,
       description?.trim() || null,
       resolvedCity,
       coords?.lat ?? null,
@@ -249,9 +278,18 @@ router.patch('/admin/:id', requireAuth, requireAdmin, async (req, res) => {
     }
   }
 
-  db.prepare('UPDATE events SET price = ?, date_text = ?, photo_url = ?, source_url = ?, venue = ?, lat = ?, lng = ? WHERE id = ?').run(
+  const newDateText = date?.trim() || row.date_text;
+  // Only re-parse when the date text actually changed — avoids silently
+  // shifting event_date (and therefore Discover/Past placement) on saves
+  // that don't touch the date at all.
+  const newEventDate = newDateText === row.date_text
+    ? row.event_date
+    : (parseEventDateText(newDateText)?.toISOString() ?? null);
+
+  db.prepare('UPDATE events SET price = ?, date_text = ?, event_date = ?, photo_url = ?, source_url = ?, venue = ?, lat = ?, lng = ? WHERE id = ?').run(
     price?.trim() || row.price,
-    date?.trim() || row.date_text,
+    newDateText,
+    newEventDate,
     photoUrl !== undefined ? (photoUrl.trim() || null) : row.photo_url,
     sourceUrl !== undefined ? (sourceUrl.trim() || null) : row.source_url,
     venue?.trim() || row.venue,

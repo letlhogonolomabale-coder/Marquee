@@ -52,6 +52,8 @@ function bestImage(tmEvent) {
 
 function toDbRow(tmEvent, city) {
   const venue = tmEvent._embedded?.venues?.[0];
+  const start = tmEvent.dates?.start;
+  const eventDate = start?.localDate ? new Date(`${start.localDate}T${start.localTime || '00:00:00'}`) : null;
   return {
     tmId: tmEvent.id,
     title: tmEvent.name,
@@ -59,6 +61,7 @@ function toDbRow(tmEvent, city) {
     cat: mapCategory(tmEvent),
     price: formatPrice(tmEvent),
     date: formatDate(tmEvent),
+    eventDate: eventDate && !isNaN(eventDate) ? eventDate.toISOString() : null,
     description: tmEvent.info || tmEvent.pleaseNote || null,
     city,
     lat: venue?.location?.latitude ? parseFloat(venue.location.latitude) : null,

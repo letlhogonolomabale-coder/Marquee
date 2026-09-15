@@ -47,6 +47,7 @@ db.exec(`
     tm_id         TEXT UNIQUE,           -- Ticketmaster event id, set only for live-sourced rows
     is_main       INTEGER NOT NULL DEFAULT 0, -- admin-picked featured event; at most one row is 1
     is_hidden     INTEGER NOT NULL DEFAULT 0, -- admin-hidden event; excluded from the public Discover list
+    event_date    TEXT,                   -- best-effort parsed timestamp (ISO), used to detect past events; NULL = unknown, always treated as upcoming
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE SET NULL
   );
@@ -83,6 +84,9 @@ if (!eventColumns.includes('is_main')) {
 if (!eventColumns.includes('is_hidden')) {
   db.exec('ALTER TABLE events ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0');
 }
+if (!eventColumns.includes('event_date')) {
+  db.exec('ALTER TABLE events ADD COLUMN event_date TEXT');
+}
 const userColumns = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
 if (!userColumns.includes('is_admin')) {
   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
@@ -96,9 +100,10 @@ if (!userColumns.includes('is_admin')) {
 // it never touches or overwrites an existing row, so admin edits made via
 // the app (price/date/photo) are never stomped on redeploy.
 const seed = require('./seedEvents');
+const { parseEventDateText } = require('./utils/eventDate');
 const insert = db.prepare(`
-    INSERT INTO events (title, venue, cat, price, date_text, description, city, lat, lng, photo_key, photo_url, color, source_url, is_main)
-    VALUES (@title, @venue, @cat, @price, @date_text, @description, @city, @lat, @lng, @photo_key, @photo_url, @color, @source_url, @is_main)
+    INSERT INTO events (title, venue, cat, price, date_text, description, city, lat, lng, photo_key, photo_url, color, source_url, is_main, event_date)
+    VALUES (@title, @venue, @cat, @price, @date_text, @description, @city, @lat, @lng, @photo_key, @photo_url, @color, @source_url, @is_main, @event_date)
   `);
 const findExisting = db.prepare(`
     SELECT 1 FROM events
@@ -125,7 +130,8 @@ const insertMissing = db.transaction((rows) => {
       // ever snapping it back (this insert never runs again for a row
       // that already exists).
       if (row.is_main) unsetCityMain.run(row.city);
-      insert.run({ ...row, is_main: row.is_main ? 1 : 0 });
+      const parsedDate = parseEventDateText(row.date_text);
+      insert.run({ ...row, is_main: row.is_main ? 1 : 0, event_date: parsedDate ? parsedDate.toISOString() : null });
       added++;
     } else if (row.is_main) {
       // Row already exists (e.g. it was added to the DB before is_main
@@ -145,5 +151,27 @@ const insertMissing = db.transaction((rows) => {
 });
 const addedCount = insertMissing(seed);
 if (addedCount > 0) console.log(`Seeded ${addedCount} new event(s) from seedEvents.js.`);
+
+// One-time backfill: any row that predates the event_date column (or was
+// otherwise never parsed) gets a best-effort pass now, so upgrading an
+// already-live database still enables the Past-page behavior without a
+// full reseed.
+const unparsed = db.prepare('SELECT id, date_text FROM events WHERE event_date IS NULL').all();
+if (unparsed.length > 0) {
+  const setEventDate = db.prepare('UPDATE events SET event_date = ? WHERE id = ?');
+  const backfill = db.transaction((rows) => {
+    let filled = 0;
+    rows.forEach((r) => {
+      const parsed = parseEventDateText(r.date_text);
+      if (parsed) {
+        setEventDate.run(parsed.toISOString(), r.id);
+        filled++;
+      }
+    });
+    return filled;
+  });
+  const filled = backfill(unparsed);
+  if (filled > 0) console.log(`Backfilled event_date on ${filled} existing event(s).`);
+}
 
 module.exports = db;

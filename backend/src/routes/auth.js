@@ -55,10 +55,22 @@ function syncAdminFlag(user) {
   return user;
 }
 
+// Email rule: must contain '@', and — deliberately stricter than typical —
+// no uppercase letters at all, so what's typed is exactly what gets stored,
+// with no silent case-folding surprises later. Also expects a normal
+// user@domain.tld shape so junk input still gets caught.
+const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
+function isValidEmail(email) {
+  return typeof email === 'string' && EMAIL_RE.test(email.trim());
+}
+
 router.post('/signup', (req, res) => {
   const { name, email, password } = req.body;
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Name, email and password are all required.' });
+  }
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: 'Enter a valid email — lowercase only, and it must contain an @.' });
   }
   if (password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters.' });

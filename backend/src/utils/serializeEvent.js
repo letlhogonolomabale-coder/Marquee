@@ -23,6 +23,7 @@ function toApiEvent(row) {
     live: row.tm_id !== null,
     isMain: !!row.is_main,
     isHidden: !!row.is_hidden,
+    eventDate: row.event_date,
   };
 }
 
