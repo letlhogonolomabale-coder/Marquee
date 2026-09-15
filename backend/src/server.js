@@ -29,9 +29,19 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 // separately (Vercel/Netlify), just delete this block and set CORS_ORIGIN
 // above to that frontend's URL.
 const FRONTEND_DIR = path.join(__dirname, '..', '..', 'frontend');
-app.use(express.static(FRONTEND_DIR));
+app.use(express.static(FRONTEND_DIR, {
+  setHeaders: (res, filePath) => {
+    // Never let the browser (or Render's edge) cache the service worker or
+    // the HTML shell — that's what caused stale deploys. Everything else
+    // (icons, manifest) is fine to cache normally.
+    if (filePath.endsWith('sw.js') || filePath.endsWith('Marquee.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+}));
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
+  res.set('Cache-Control', 'no-cache');
   res.sendFile(path.join(FRONTEND_DIR, 'Marquee.html'));
 });
 

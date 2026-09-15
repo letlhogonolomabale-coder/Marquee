@@ -6,7 +6,7 @@
 //
 // Bump CACHE_NAME whenever you change Marquee.html so old clients pick up
 // the new version instead of serving a cached copy forever.
-const CACHE_NAME = 'marquee-shell-v8';
+const CACHE_NAME = 'marquee-shell-v9';
 const SHELL_FILES = ['/', '/Marquee.html', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -31,17 +31,39 @@ self.addEventListener('fetch', (event) => {
   // Never cache API calls — always hit the network.
   if (url.pathname.startsWith('/api/')) return;
 
+  // Network-first for navigations and the HTML shell itself, so a fresh
+  // deploy shows up on the very next load instead of waiting for a manual
+  // CACHE_NAME bump. Falls back to the cached copy only when offline.
+  const isShellRequest = event.request.mode === 'navigate' ||
+    SHELL_FILES.includes(url.pathname);
+
+  if (isShellRequest) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('/Marquee.html')))
+    );
+    return;
+  }
+
+  // Cache-first for everything else (icons, fonts, etc.) — fine to keep,
+  // since those are static assets that rarely change.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((response) => {
-        // Only cache successful same-origin GET responses.
         if (event.request.method === 'GET' && response.ok && url.origin === location.origin) {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         }
         return response;
       });
-    }).catch(() => caches.match('/Marquee.html'))
+    })
   );
 });
