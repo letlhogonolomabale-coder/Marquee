@@ -6,6 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0A0A0C">
+<!-- Stops iOS/Android from auto-detecting the email/phone text on the
+     account page and turning it into a highlighted tappable link. -->
+<meta name="format-detection" content="telephone=no, email=no, address=no">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="64x64" href="/icons/favicon-64.png">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -575,6 +578,7 @@
   }
   .profile-header-info h2{font-family:'Fraunces',serif;font-weight:600;font-size:21px;margin:0 0 2px;}
   .profile-header-info p{color:var(--muted);font-size:13px;margin:0;}
+  .profile-email{cursor:pointer;user-select:none;-webkit-user-select:none;}
   .profile-badge{
     display:inline-flex;align-items:center;gap:4px;margin-top:7px;
     font-size:11.5px;font-weight:700;color:var(--teal);
@@ -809,7 +813,7 @@
   <div class="bokeh" style="width:44px;height:44px;background:var(--amber);top:45%;left:4%;animation-delay:1.8s;opacity:0.35;"></div>
 
   <div class="landing-inner">
-    <img class="logo-mark" src="data:image/png;base64,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" alt="Marquee" />
+    <img class="logo-mark" src="data:image/png;base64,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" alt="Marquee" />
     <h1>Marquee</h1>
     <p class="landing-tag">Nightlife, festivals and trips worth chasing — scouted for you, saved for later, with a ride sorted before you even ask.</p>
     <div class="landing-progress"><div class="landing-progress-fill animate" id="landing-progress-fill"></div></div>
@@ -827,7 +831,7 @@
 <div id="app">
   <div class="topbar">
     <div class="topbar-brand">
-      <img class="topbar-logo" src="data:image/png;base64,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" alt="Marquee" />
+      <img class="topbar-logo" src="data:image/png;base64,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" alt="Marquee" />
       <span>Marquee</span>
     </div>
     <div class="navtabs">
@@ -1028,7 +1032,7 @@ function showPage(name){
   document.querySelectorAll('.navtabs button').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   document.getElementById('tab-' + name).classList.add('active');
-  if(name === 'past' && pastRenderedCity !== lastCity){ renderPast(); }
+  if(name === 'past' && !blogRendered){ renderPast(); }
   if(name === 'host'){ renderHost(); }
   if(name === 'admin'){ renderAdmin(); }
   window.scrollTo(0,0);
@@ -1065,9 +1069,8 @@ let favorites = {};
 let notifiedIds = new Set();
 let pendingRideEvent = null;
 let selectedRideOption = 1;
-let pastRendered = false;
-let pastRenderedCity = null;
-let pastEvents = [];
+let blogRendered = false;
+let blogPosts = [];
 let activeCategory = 'All';
 let sortMode = 'soonest';
 let userVibes = new Set();
@@ -1272,7 +1275,7 @@ function openEventSource(id){
 // even has an external source_url. Uses the native share sheet where
 // available (mobile), falling back to copying the link to the clipboard.
 async function shareEvent(id){
-  const ev = favorites[id] || foundEvents.find(e => e.id === id) || myHostedEvents.find(e => e.id === id) || pastEvents.find(e => e.id === id);
+  const ev = favorites[id] || foundEvents.find(e => e.id === id) || myHostedEvents.find(e => e.id === id);
   if(!ev) return;
   const url = `${location.origin}${location.pathname}?event=${id}`;
   const text = `${ev.title} — ${ev.venue}, ${ev.city}`;
@@ -1362,52 +1365,63 @@ function showToast(title, body, withRideAction, evId){
   setTimeout(() => { if(el.parentNode) el.remove(); }, 9000);
 }
 
-// ================= past events =================
+// ================= made waves (blog) =================
 // Reviews/photos are demo-only: state lives in memory and resets on reload —
-// there's no backend here to persist them yet.
+// there's no backend here to persist them yet. The posts themselves *are*
+// persisted (via /api/blog), editable by admins from Admin > Blog.
 let pendingCommentPhoto = {}; // idx -> staged photo data URL, cleared on submit
 
 async function renderPast(){
   const list = document.getElementById('past-list');
-  list.innerHTML = `<div class="empty">Loading past events…</div>`;
+  list.innerHTML = `<div class="empty">Loading…</div>`;
   try{
-    const { events } = await apiFetch('/api/events/past?city=' + encodeURIComponent(lastCity));
-    pastEvents = events;
-    pastRenderedCity = lastCity;
-    pastRendered = true;
-    if(pastEvents.length === 0){
-      list.innerHTML = `<div class="empty">No past events yet for ${escapeHtml(lastCity)} — check back once upcoming ones wrap up.</div>`;
-      return;
-    }
-    list.innerHTML = pastEvents.map((p) => {
-      const photoKey = p.photoKey || CAT_PHOTO[p.cat] || 'party';
-      const photoUrl = p.photoUrl || PHOTO[photoKey];
-      return `
-      <div class="past-card">
-        <div class="past-photo" style="background-image:url('${photoUrl}')">
-          <span class="trend-badge">🔥 Trending then</span>
-        </div>
-        <div class="past-body">
-          <p class="past-title">${escapeHtml(p.title)}</p>
-          <p class="past-loc">${escapeHtml(p.venue)}, ${escapeHtml(p.city)}</p>
-          <p class="past-blurb">${escapeHtml(p.description || p.date)}</p>
-          <div class="past-stats"><span><b>${escapeHtml(p.date)}</b></span><span><b>${escapeHtml(p.price)}</b></span></div>
-          ${renderCommentList(p.id)}
-          <button class="comment-toggle" onclick="toggleCommentForm(${p.id})">💬 Share your take</button>
-          <div class="comment-form" id="comment-form-${p.id}" style="display:none">
-            <textarea id="comment-text-${p.id}" placeholder="What was it like?"></textarea>
-            <div class="comment-form-row">
-              <input type="file" id="comment-photo-${p.id}" accept="image/*" style="display:none" onchange="handlePastPhoto(${p.id}, event)" />
-              <button class="comment-photo-btn" id="comment-photo-btn-${p.id}" onclick="document.getElementById('comment-photo-${p.id}').click()">📷 Add photo</button>
-              <button class="comment-submit" onclick="submitPastComment(${p.id})">Post</button>
-            </div>
+    const { posts } = await apiFetch('/api/blog');
+    blogPosts = posts;
+    blogRendered = true;
+    renderBlogList();
+  } catch(err){
+    list.innerHTML = `<div class="empty">Couldn't load — ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderBlogList(){
+  const list = document.getElementById('past-list');
+  if(blogPosts.length === 0){
+    list.innerHTML = `<div class="empty">Nothing here yet — check back soon.</div>`;
+    return;
+  }
+  list.innerHTML = blogPosts.map((p) => {
+    const photoUrl = p.coverPhotoUrl || PHOTO.neon;
+    return `
+    <div class="past-card">
+      <div class="past-photo" style="background-image:url('${photoUrl}')">
+        <span class="trend-badge">🔥 Made waves</span>
+      </div>
+      <div class="past-body">
+        <p class="past-title">${escapeHtml(p.title)}</p>
+        ${p.happenedOn ? `<p class="past-loc">${escapeHtml(p.happenedOn)}</p>` : ''}
+        <p class="past-blurb">${escapeHtml(p.summary || p.body)}</p>
+        ${p.summary && p.body && p.body !== p.summary ? `<button class="link-btn" style="display:block;margin-bottom:10px" onclick="toggleBlogBody(${p.id})">Read more</button>
+        <p class="past-blurb" id="blog-body-${p.id}" style="display:none">${escapeHtml(p.body)}</p>` : ''}
+        ${p.sourceUrl ? `<a class="link-btn" style="display:block;margin-bottom:10px" href="${escapeHtml(p.sourceUrl)}" target="_blank" rel="noopener">Read more →</a>` : ''}
+        ${renderCommentList(p.id)}
+        <button class="comment-toggle" onclick="toggleCommentForm(${p.id})">💬 Share your take</button>
+        <div class="comment-form" id="comment-form-${p.id}" style="display:none">
+          <textarea id="comment-text-${p.id}" placeholder="What was it like?"></textarea>
+          <div class="comment-form-row">
+            <input type="file" id="comment-photo-${p.id}" accept="image/*" style="display:none" onchange="handlePastPhoto(${p.id}, event)" />
+            <button class="comment-photo-btn" id="comment-photo-btn-${p.id}" onclick="document.getElementById('comment-photo-${p.id}').click()">📷 Add photo</button>
+            <button class="comment-submit" onclick="submitPastComment(${p.id})">Post</button>
           </div>
         </div>
-      </div>`;
-    }).join('');
-  } catch(err){
-    list.innerHTML = `<div class="empty">Couldn't load past events — ${escapeHtml(err.message)}</div>`;
-  }
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleBlogBody(id){
+  const el = document.getElementById('blog-body-' + id);
+  if(el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 function renderCommentList(idx){
@@ -1449,7 +1463,7 @@ function submitPastComment(idx){
   if(!pastComments[idx]) pastComments[idx] = [];
   pastComments[idx].push({author:'You', text, photo: pendingCommentPhoto[idx] || null});
   delete pendingCommentPhoto[idx];
-  renderPast();
+  renderBlogList();
   showToast('Posted', "Your take is up — heads up, this demo doesn't save it after you close the page.");
 }
 
@@ -1570,7 +1584,9 @@ function profileViewHtml(){
       <div class="profile-avatar">${escapeHtml(initialsFor(currentUser.name))}</div>
       <div class="profile-header-info">
         <h2>${escapeHtml(currentUser.name)}</h2>
-        <p>${escapeHtml(currentUser.email)}</p>
+        <p class="profile-email" onclick="toggleEmailReveal(this)" data-revealed="false"
+           data-full="${escapeHtml(currentUser.email)}" data-masked="${escapeHtml(maskEmail(currentUser.email))}"
+           title="Tap to reveal">${escapeHtml(maskEmail(currentUser.email))}</p>
         ${status === 'verified' ? '<span class="profile-badge">✓ Verified host</span>' : ''}
       </div>
     </div>
@@ -1589,19 +1605,7 @@ function profileViewHtml(){
       </button>
     </div>
 
-    <div class="profile-section">
-      <div class="profile-section-title">Support</div>
-      <a class="profile-row" href="mailto:letlhogonolomabalee@gmail.com">
-        <span class="profile-row-icon">✉️</span>
-        <span class="profile-row-label">Email us</span>
-        <span class="profile-row-value">letlhogonolomabalee@gmail.com</span>
-      </a>
-      <a class="profile-row" href="https://wa.me/27710900739" target="_blank" rel="noopener">
-        <span class="profile-row-icon">💬</span>
-        <span class="profile-row-label">WhatsApp us</span>
-        <span class="profile-row-value">Chat on WhatsApp</span>
-      </a>
-    </div>
+    ${supportSectionHtml()}
 
     ${hostedList}
 
@@ -1620,6 +1624,7 @@ function signupFormHtml(){
     <div class="field"><label>Password</label><input id="host-pass" type="password" placeholder="At least 8 characters" /></div>
     <button class="primary-btn" onclick="submitSignup()">Create account</button>
     <button class="link-btn" style="display:block;margin:14px auto 0" onclick="hostState.mode='login'; renderHost();">Already have an account? Log in</button>
+    ${supportSectionHtml()}
   `;
 }
 
@@ -1633,6 +1638,7 @@ function loginFormHtml(){
     <div class="field"><label>Password</label><input id="login-pass" type="password" placeholder="Your password" /></div>
     <button class="primary-btn" onclick="submitLogin()">Log in</button>
     <button class="link-btn" style="display:block;margin:14px auto 0" onclick="hostState.mode='signup'; renderHost();">New here? Create an account</button>
+    ${supportSectionHtml()}
   `;
 }
 
@@ -1736,8 +1742,9 @@ async function handleIdUpload(evt){
 
 // ================= admin (events + user/verification management) =================
 let adminEvents = [];
+let adminEventSearch = '';
 let adminUsers = [];
-let adminView = 'events'; // 'events' | 'users'
+let adminView = 'events'; // 'events' | 'users' | 'blog'
 
 function renderAdmin(){
   const c = document.getElementById('admin-content');
@@ -1745,10 +1752,13 @@ function renderAdmin(){
     <div class="navtabs" style="margin-bottom:16px">
       <button class="${adminView === 'events' ? 'active' : ''}" onclick="adminView='events'; renderAdmin();">Events</button>
       <button class="${adminView === 'users' ? 'active' : ''}" onclick="adminView='users'; renderAdmin();">Users</button>
+      <button class="${adminView === 'blog' ? 'active' : ''}" onclick="adminView='blog'; renderAdmin();">Blog</button>
     </div>
     <div id="admin-subcontent"><p class="hint">Loading…</p></div>
   `;
-  if(adminView === 'events') renderAdminEvents(); else renderAdminUsers();
+  if(adminView === 'events') renderAdminEvents();
+  else if(adminView === 'users') renderAdminUsers();
+  else renderAdminBlog();
 }
 
 async function renderAdminEvents(){
@@ -1757,10 +1767,39 @@ async function renderAdminEvents(){
     const { events } = await apiFetch('/api/events/admin/all');
     adminEvents = events;
     const hint = '<p class="hint" style="margin-bottom:12px">Every city always shows a main event at the top of Discover — if you haven\'t picked one below, the soonest event in that city is used automatically until you do.</p>';
-    c.innerHTML = hint + (adminEvents.map(adminEventRow).join('') || '<p class="hint">No events yet.</p>');
+    const searchBox = `
+      <div class="field" style="margin-bottom:14px">
+        <input id="admin-event-search" type="text" placeholder="Search by title, venue or city…"
+               value="${escapeHtml(adminEventSearch)}" oninput="filterAdminEvents(this.value)" />
+      </div>
+    `;
+    c.innerHTML = hint + searchBox + `<div id="admin-event-rows"></div>`;
+    renderAdminEventRows();
   } catch(err){
     c.innerHTML = `<p class="hint">Couldn't load events — ${escapeHtml(err.message)}</p>`;
   }
+}
+
+// Filters the already-loaded adminEvents client-side as the admin types —
+// no need to re-fetch from the server on every keystroke. Re-rendering just
+// the rows (not the search box itself) keeps focus in the input while typing.
+function filterAdminEvents(value){
+  adminEventSearch = value;
+  renderAdminEventRows();
+}
+
+function renderAdminEventRows(){
+  const rows = document.getElementById('admin-event-rows');
+  if(!rows) return;
+  const q = adminEventSearch.trim().toLowerCase();
+  const matches = q
+    ? adminEvents.filter(ev =>
+        ev.title.toLowerCase().includes(q) ||
+        ev.venue.toLowerCase().includes(q) ||
+        ev.city.toLowerCase().includes(q))
+    : adminEvents;
+  rows.innerHTML = matches.map(adminEventRow).join('') ||
+    `<p class="hint">${q ? `No events match "${escapeHtml(adminEventSearch)}".` : 'No events yet.'}</p>`;
 }
 
 function adminEventRow(ev){
@@ -1867,6 +1906,102 @@ async function saveAdminEvent(id){
     await runScan();
   } catch(err){
     showToast("Couldn't save", err.message);
+  }
+}
+
+// ================= admin: blog =================
+let adminBlogPosts = [];
+
+async function renderAdminBlog(){
+  const c = document.getElementById('admin-subcontent');
+  try{
+    const { posts } = await apiFetch('/api/blog');
+    adminBlogPosts = posts;
+    const newPostForm = `
+      <div class="host-hero" style="margin-bottom:14px">
+        <h3 style="font-size:15px">Add a post</h3>
+        <div class="field"><label>Title</label><input id="new-blog-title" type="text" placeholder="What happened?" /></div>
+        <div class="field"><label>When (shown on the card)</label><input id="new-blog-when" type="text" placeholder="e.g. March 2021" /></div>
+        <div class="field"><label>Short summary</label><textarea id="new-blog-summary" placeholder="One or two sentences for the card"></textarea></div>
+        <div class="field"><label>Full write-up</label><textarea id="new-blog-body" placeholder="The full story"></textarea></div>
+        <div class="field"><label>Cover photo link (optional)</label><input id="new-blog-photo" type="url" placeholder="https://..." /></div>
+        <div class="field"><label>Source link (optional)</label><input id="new-blog-source" type="url" placeholder="https://..." /></div>
+        <button class="primary-btn" onclick="createAdminBlogPost()">Publish post</button>
+      </div>
+    `;
+    c.innerHTML = newPostForm + (adminBlogPosts.map(adminBlogRow).join('') || '<p class="hint">No posts yet.</p>');
+  } catch(err){
+    c.innerHTML = `<p class="hint">Couldn't load posts — ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function adminBlogRow(p){
+  return `
+  <div class="host-hero" style="margin-bottom:14px">
+    <h3 style="font-size:15px">${escapeHtml(p.title)}</h3>
+    <div class="field"><label>Title</label><input id="admin-blog-title-${p.id}" type="text" value="${escapeHtml(p.title)}" /></div>
+    <div class="field"><label>When</label><input id="admin-blog-when-${p.id}" type="text" value="${escapeHtml(p.happenedOn || '')}" /></div>
+    <div class="field"><label>Short summary</label><textarea id="admin-blog-summary-${p.id}">${escapeHtml(p.summary || '')}</textarea></div>
+    <div class="field"><label>Full write-up</label><textarea id="admin-blog-body-${p.id}">${escapeHtml(p.body || '')}</textarea></div>
+    <div class="field"><label>Cover photo link</label><input id="admin-blog-photo-${p.id}" type="url" value="${escapeHtml(p.coverPhotoUrl || '')}" /></div>
+    <div class="field"><label>Source link</label><input id="admin-blog-source-${p.id}" type="url" value="${escapeHtml(p.sourceUrl || '')}" /></div>
+    <button class="primary-btn" onclick="saveAdminBlogPost(${p.id})">Save</button>
+    <button class="link-btn" style="display:block;margin-top:10px;color:var(--danger)" onclick="deleteAdminBlogPost(${p.id}, '${escapeHtml(p.title).replace(/'/g, "\\'")}')">Delete post</button>
+  </div>`;
+}
+
+async function createAdminBlogPost(){
+  const title = document.getElementById('new-blog-title').value.trim();
+  const happenedOn = document.getElementById('new-blog-when').value.trim();
+  const summary = document.getElementById('new-blog-summary').value.trim();
+  const body = document.getElementById('new-blog-body').value.trim();
+  const coverPhotoUrl = document.getElementById('new-blog-photo').value.trim();
+  const sourceUrl = document.getElementById('new-blog-source').value.trim();
+  if(!title || !body){
+    showToast('Almost there', 'Add at least a title and the full write-up.');
+    return;
+  }
+  try{
+    await apiFetch('/api/blog', {
+      method: 'POST',
+      body: JSON.stringify({ title, happenedOn, summary, body, coverPhotoUrl, sourceUrl })
+    });
+    showToast('Published', 'Your post is live on Made waves.');
+    blogRendered = false; // force the public page to refetch next time it's opened
+    await renderAdminBlog();
+  } catch(err){
+    showToast("Couldn't publish", err.message);
+  }
+}
+
+async function saveAdminBlogPost(id){
+  const title = document.getElementById('admin-blog-title-' + id).value.trim();
+  const happenedOn = document.getElementById('admin-blog-when-' + id).value.trim();
+  const summary = document.getElementById('admin-blog-summary-' + id).value.trim();
+  const body = document.getElementById('admin-blog-body-' + id).value.trim();
+  const coverPhotoUrl = document.getElementById('admin-blog-photo-' + id).value.trim();
+  const sourceUrl = document.getElementById('admin-blog-source-' + id).value.trim();
+  try{
+    await apiFetch('/api/blog/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ title, happenedOn, summary, body, coverPhotoUrl, sourceUrl })
+    });
+    showToast('Saved', 'Post updated.');
+    blogRendered = false;
+  } catch(err){
+    showToast("Couldn't save", err.message);
+  }
+}
+
+async function deleteAdminBlogPost(id, title){
+  if(!confirm(`Delete "${title}"? This can't be undone.`)) return;
+  try{
+    await apiFetch('/api/blog/' + id, { method: 'DELETE' });
+    showToast('Deleted', `"${title}" was removed.`);
+    blogRendered = false;
+    await renderAdminBlog();
+  } catch(err){
+    showToast("Couldn't delete", err.message);
   }
 }
 
@@ -2146,6 +2281,53 @@ function escapeHtml(str){
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
+}
+
+// Hides most of an email address by default, e.g. "je***@g***.com" — the
+// same idea as masking a phone number. Keeps just enough of each side to
+// still be recognizable as "yours" without showing it in full.
+function maskEmail(email){
+  if(!email || !email.includes('@')) return email || '';
+  const [local, domain] = email.split('@');
+  const domainParts = domain.split('.');
+  const tld = domainParts.pop() || '';
+  const domainName = domainParts.join('.') || domain;
+  const maskPart = (s, keep) => {
+    if(!s) return s;
+    const visible = s.slice(0, Math.min(keep, s.length - 1 || 1));
+    return visible + '*'.repeat(Math.max(s.length - visible.length, 2));
+  };
+  return `${maskPart(local, 2)}@${maskPart(domainName, 1)}.${tld}`;
+}
+
+// Emails start masked (see maskEmail above); the account owner can still
+// tap their own to check it's right or copy it — it's just not shown in
+// full by default.
+function toggleEmailReveal(el){
+  const revealed = el.dataset.revealed === 'true';
+  el.textContent = revealed ? el.dataset.masked : el.dataset.full;
+  el.dataset.revealed = revealed ? 'false' : 'true';
+}
+
+// Shared "Support" block — shown both to logged-in members (on their
+// profile) and to anyone still on the login/signup screen, so help is
+// available before someone has an account at all.
+function supportSectionHtml(){
+  return `
+    <div class="profile-section">
+      <div class="profile-section-title">Support</div>
+      <a class="profile-row" href="mailto:letlhogonolomabalee@gmail.com">
+        <span class="profile-row-icon">✉️</span>
+        <span class="profile-row-label">Email us</span>
+        <span class="profile-row-value">letlhogonolomabalee@gmail.com</span>
+      </a>
+      <a class="profile-row" href="https://wa.me/27710900739" target="_blank" rel="noopener">
+        <span class="profile-row-icon">💬</span>
+        <span class="profile-row-label">WhatsApp us</span>
+        <span class="profile-row-value">Chat on WhatsApp</span>
+      </a>
+    </div>
+  `;
 }
 
 // initial state

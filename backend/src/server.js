@@ -8,6 +8,7 @@ const authRoutes = require('./routes/auth');
 const eventsRoutes = require('./routes/events');
 const favoritesRoutes = require('./routes/favorites');
 const adminRoutes = require('./routes/admin');
+const blogRoutes = require('./routes/blog');
 const { requireAuth, requireAdmin } = require('./middleware/auth');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change_this_to_a_long_random_string') {
@@ -22,6 +23,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api/admin', requireAuth, requireAdmin, adminRoutes);
+// Blog reading is public; writing is protected route-by-route inside blog.js
+// (POST/PATCH/DELETE each require an admin), not at the mount point here.
+app.use('/api/blog', blogRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

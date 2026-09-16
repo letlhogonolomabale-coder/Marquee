@@ -144,6 +144,21 @@ async function ensureSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_events_city ON events(city);
+
+    CREATE TABLE IF NOT EXISTS blog_posts (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      title            TEXT NOT NULL,
+      happened_on      TEXT,                 -- display text, e.g. "February 2015" — not used for sorting
+      summary          TEXT,                 -- short teaser shown on the card before it's expanded
+      body             TEXT NOT NULL,        -- full write-up
+      cover_photo_url  TEXT,                 -- falls back to a generic photo on the frontend if unset
+      source_url       TEXT,                 -- optional link to read more elsewhere
+      author_user_id   INTEGER,              -- the admin who wrote it; NULL if that account is later deleted
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (author_user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON blog_posts(created_at);
   `);
 
   // Lightweight migrations for DBs created before these columns existed —
@@ -240,12 +255,36 @@ async function seedEvents() {
   }
 }
 
+// ---- Blog seed sync ---------------------------------------------------
+// Same idea as seedEvents() above, matched by title instead of
+// title+venue+city: only inserts posts that aren't already there, so admin
+// edits/deletes made through the Admin > Blog tab are never undone by a
+// later redeploy.
+async function seedBlogPosts() {
+  const seed = require('./seedBlog');
+  const insert = prepare(`
+    INSERT INTO blog_posts (title, happened_on, summary, body, cover_photo_url, source_url)
+    VALUES (@title, @happened_on, @summary, @body, @cover_photo_url, @source_url)
+  `);
+  const findExisting = prepare('SELECT 1 FROM blog_posts WHERE lower(trim(title)) = lower(trim(?)) LIMIT 1');
+
+  let added = 0;
+  for (const post of seed) {
+    const existing = await findExisting.get(post.title);
+    if (!existing) {
+      await insert.run({ cover_photo_url: null, source_url: null, ...post });
+      added++;
+    }
+  }
+  if (added > 0) console.log(`Seeded ${added} new blog post(s) from seedBlog.js.`);
+}
+
 let readyPromise = null;
 // Call this once at server startup (see server.js) before accepting any
 // requests — creates tables/migrations/seed data if needed.
 function init() {
   if (!readyPromise) {
-    readyPromise = ensureSchema().then(seedEvents);
+    readyPromise = ensureSchema().then(seedEvents).then(seedBlogPosts);
   }
   return readyPromise;
 }
