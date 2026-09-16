@@ -197,7 +197,8 @@ async function seedEvents() {
     let added = 0;
     for (const r of seed) {
       const row = withDefaults(r);
-      const existing = await findExisting.get(row);
+      const idParams = { title: row.title, venue: row.venue, city: row.city };
+      const existing = await findExisting.get(idParams);
       if (!existing) {
         // `is_main: true` in seedEvents.js only takes effect the moment this
         // row is first created — an admin is free to change it afterwards
@@ -211,7 +212,7 @@ async function seedEvents() {
         // this city is currently marked main at all, so a deliberate admin
         // choice is never overwritten by a later redeploy.
         const hasMain = await cityHasMain.get(row.city);
-        if (!hasMain) await backfillMain.run(row);
+        if (!hasMain) await backfillMain.run(idParams);
       }
     }
     return added;
