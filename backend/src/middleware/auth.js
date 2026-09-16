@@ -34,10 +34,14 @@ function optionalAuth(req, res, next) {
 
 // Chain after requireAuth. Only lets the request through if the logged-in
 // user's is_admin flag is set (see ADMIN_EMAIL handling in auth.js).
-function requireAdmin(req, res, next) {
-  const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(req.user.id);
-  if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin access only.' });
-  next();
+async function requireAdmin(req, res, next) {
+  try {
+    const user = await db.prepare('SELECT is_admin FROM users WHERE id = ?').get(req.user.id);
+    if (!user || !user.is_admin) return res.status(403).json({ error: 'Admin access only.' });
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 module.exports = { requireAuth, optionalAuth, requireAdmin };

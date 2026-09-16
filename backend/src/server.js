@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const db = require('./db');
 
 const authRoutes = require('./routes/auth');
 const eventsRoutes = require('./routes/events');
@@ -53,4 +54,15 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`Marquee API running on http://localhost:${PORT}`));
+
+// Turso setup (schema creation + seeding) is async now, since every call is
+// a network request — so the server waits for it to finish once at startup
+// instead of doing it synchronously at require time.
+db.init()
+  .then(() => {
+    app.listen(PORT, () => console.log(`Marquee API running on http://localhost:${PORT}`));
+  })
+  .catch((err) => {
+    console.error('Failed to set up the database — check TURSO_DATABASE_URL / TURSO_AUTH_TOKEN:', err);
+    process.exit(1);
+  });

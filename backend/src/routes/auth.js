@@ -45,11 +45,11 @@ function publicUser(user) {
 // is_admin flag on. Runs on every signup/login so setting/changing the env
 // var on Render takes effect the next time that person logs in — no manual
 // database editing needed.
-function syncAdminFlag(user) {
+async function syncAdminFlag(user) {
   const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
   const shouldBeAdmin = adminEmail && user.email === adminEmail ? 1 : 0;
   if (shouldBeAdmin !== user.is_admin) {
-    db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(shouldBeAdmin, user.id);
+    await db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(shouldBeAdmin, user.id);
     user.is_admin = shouldBeAdmin;
   }
   return user;
@@ -64,47 +64,59 @@ function isValidEmail(email) {
   return typeof email === 'string' && EMAIL_RE.test(email.trim());
 }
 
-router.post('/signup', (req, res) => {
-  const { name, email, password } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Name, email and password are all required.' });
-  }
-  if (!isValidEmail(email)) {
-    return res.status(400).json({ error: 'Enter a valid email — lowercase only, and it must contain an @.' });
-  }
-  if (password.length < 8) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
-  }
+router.post('/signup', async (req, res, next) => {
+  try {
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Name, email and password are all required.' });
+    }
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Enter a valid email — lowercase only, and it must contain an @.' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
 
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
-  if (existing) return res.status(409).json({ error: 'An account with that email already exists.' });
+    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
+    if (existing) return res.status(409).json({ error: 'An account with that email already exists.' });
 
-  const passwordHash = bcrypt.hashSync(password, 10);
-  const result = db
-    .prepare('INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)')
-    .run(name.trim(), email.toLowerCase().trim(), passwordHash);
+    const passwordHash = bcrypt.hashSync(password, 10);
+    const result = await db
+      .prepare('INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)')
+      .run(name.trim(), email.toLowerCase().trim(), passwordHash);
 
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
-  syncAdminFlag(user);
-  res.status(201).json({ token: signToken(user), user: publicUser(user) });
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+    await syncAdminFlag(user);
+    res.status(201).json({ token: signToken(user), user: publicUser(user) });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.post('/login', (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
+router.post('/login', async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Incorrect email or password.' });
+    const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Incorrect email or password.' });
+    }
+    await syncAdminFlag(user);
+    res.json({ token: signToken(user), user: publicUser(user) });
+  } catch (err) {
+    next(err);
   }
-  syncAdminFlag(user);
-  res.json({ token: signToken(user), user: publicUser(user) });
 });
 
-router.get('/me', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-  res.json({ user: publicUser(user) });
+router.get('/me', requireAuth, async (req, res, next) => {
+  try {
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    res.json({ user: publicUser(user) });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Upload an ID photo to request host verification. An admin now reviews and
@@ -118,21 +130,29 @@ router.get('/me', requireAuth, (req, res) => {
 //   3. Consider a dedicated ID-verification provider (Stripe Identity,
 //      Onfido, Persona) instead of manual photo review, for both liability
 //      and fraud-detection reasons at any real scale
-router.post('/verify-id', requireAuth, upload.single('idImage'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No ID image uploaded.' });
+router.post('/verify-id', requireAuth, upload.single('idImage'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No ID image uploaded.' });
 
-  db.prepare('UPDATE users SET verification_status = ?, id_file_path = ? WHERE id = ?').run(
-    'pending',
-    req.file.path,
-    req.user.id
-  );
+    await db.prepare('UPDATE users SET verification_status = ?, id_file_path = ? WHERE id = ?').run(
+      'pending',
+      req.file.path,
+      req.user.id
+    );
 
-  res.json({ status: 'pending', message: 'ID submitted — you\'ll be notified once it\'s reviewed.' });
+    res.json({ status: 'pending', message: 'ID submitted — you\'ll be notified once it\'s reviewed.' });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.get('/verify-id/status', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT verification_status FROM users WHERE id = ?').get(req.user.id);
-  res.json({ status: user.verification_status });
+router.get('/verify-id/status', requireAuth, async (req, res, next) => {
+  try {
+    const user = await db.prepare('SELECT verification_status FROM users WHERE id = ?').get(req.user.id);
+    res.json({ status: user.verification_status });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;

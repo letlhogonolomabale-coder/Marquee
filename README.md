@@ -3,7 +3,7 @@
 This turns the original static prototype into a real client/server app:
 
 - **Real accounts** — signup/login with hashed passwords + JWT sessions (was: name/email typed into memory)
-- **A real database** (SQLite) — events, users, and favorites now persist across refreshes and devices
+- **A real, permanently-hosted database (Turso/libSQL)** — events, users, and favorites persist across refreshes, devices, and redeploys. (This used to be a local SQLite file, which Render silently wiped on every deploy — see "Before this goes live" below.)
 - **Real event data source** — `/api/events` queries the DB instead of randomly sampling a hardcoded array; the old `EVENT_POOL` is now the DB's seed data
 - **Real ID-verification workflow** — file upload is saved server-side and status-tracked (`none → pending → verified`), instead of a `setTimeout` in the browser
 - **Real geocoding** — hosted events get real coordinates from OpenStreetMap's Nominatim API instead of defaulting to the Joburg city center
@@ -14,7 +14,7 @@ What's *not* changed: the ride sheet still hands off to the real Uber app/site (
 ## Project layout
 
 ```
-backend/     Node.js + Express API + SQLite database
+backend/     Node.js + Express API + Turso (hosted libSQL) database
 frontend/    Marquee.html (now calls the API) + manifest.json + sw.js + icons
 ```
 
@@ -23,7 +23,8 @@ frontend/    Marquee.html (now calls the API) + manifest.json + sw.js + icons
 ```bash
 cd backend
 cp .env.example .env
-# open .env and set a real JWT_SECRET — a generator command is in the comments there
+# open .env and fill in TURSO_DATABASE_URL / TURSO_AUTH_TOKEN (from turso.tech)
+# and set a real JWT_SECRET — a generator command is in the comments there
 npm install
 npm start
 ```
@@ -44,7 +45,7 @@ To open the frontend as a plain file instead (e.g. `file:///.../Marquee.html`) w
 The code has inline comments flagging these, but the short version:
 
 1. **ID verification is auto-approved for demo continuity.** Before real ID photos are involved, swap this for a real review queue or a provider like Stripe Identity/Onfido/Persona, and move the stored files to encrypted cloud storage instead of local disk. This is the single most important thing to fix before this leaves your laptop.
-2. **SQLite → Postgres** once you have concurrent write load or need multiple server instances (SQLite is genuinely fine for early usage though).
+2. **Rotate your Turso auth token before real users are involved** if it was ever pasted into a chat, a screenshot, or anywhere outside your own `.env` file/Render's dashboard — treat it like a password. Generate a fresh one from the Turso dashboard and swap it in both places.
 3. **JWT_SECRET** must be a real random value in production, not the placeholder.
 4. **Rate limiting** isn't in yet — add it (e.g. `express-rate-limit`) on `/api/auth/*` before this is public, so people can't brute-force logins.
 5. **HTTPS** — required for service workers and geolocation outside of localhost; your host (Render, Railway, Fly.io, a VPS + Caddy, etc.) will typically handle this for you.
