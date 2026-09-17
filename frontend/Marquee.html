@@ -997,6 +997,76 @@ if('serviceWorker' in navigator){
   });
 }
 
+// ================= "Download app" (PWA install) =================
+// Chrome/Edge/Android fire this instead of doing anything automatically —
+// capturing it is what lets us show our own "Download app" button instead
+// of relying on the browser's own menu. It's a one-shot: once used (or
+// dismissed), the browser won't fire it again until the page reloads.
+let deferredInstallPrompt = null;
+let appIsInstalled = window.matchMedia('(display-mode: standalone)').matches;
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  refreshInstallButton();
+});
+
+window.addEventListener('appinstalled', () => {
+  appIsInstalled = true;
+  deferredInstallPrompt = null;
+  refreshInstallButton();
+});
+
+// iOS Safari never fires beforeinstallprompt — there's no programmatic
+// install there, only the manual Share > Add to Home Screen flow — so we
+// detect it separately to show the right instructions instead of a dead
+// button.
+function isIosSafari(){
+  const ua = navigator.userAgent;
+  return /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+}
+
+function installAppSectionHtml(){
+  if(appIsInstalled) return '';
+  if(deferredInstallPrompt){
+    return `
+      <button class="profile-row" id="install-app-row" onclick="promptAppInstall()">
+        <span class="profile-row-icon">⬇️</span>
+        <span class="profile-row-label">Download app</span>
+        <span class="profile-row-value">Install for offline use</span>
+      </button>
+    `;
+  }
+  if(isIosSafari()){
+    return `
+      <button class="profile-row" id="install-app-row" onclick="showToast('Add to Home Screen', 'Tap the Share icon below, then \\'Add to Home Screen\\'.')">
+        <span class="profile-row-icon">⬇️</span>
+        <span class="profile-row-label">Download app</span>
+        <span class="profile-row-value">Via Share → Add to Home Screen</span>
+      </button>
+    `;
+  }
+  // Neither signal fired yet (e.g. desktop Firefox, or Chrome hasn't
+  // decided this page is installable yet) — nothing reliable to offer.
+  return '';
+}
+
+async function promptAppInstall(){
+  if(!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  if(outcome === 'accepted') showToast('Installing…', 'Marquee is being added to your device.');
+  refreshInstallButton();
+}
+
+// The button lives inside whichever screen is currently rendered (login,
+// signup, or profile), so just re-render whichever one's showing rather
+// than tracking a single fixed DOM node.
+function refreshInstallButton(){
+  if(document.getElementById('page-host')?.classList.contains('active')) renderHost();
+}
+
 // ================= landing / nav =================
 let hasEntered = false;
 const AUTO_ENTER_MS = 5000;
@@ -1623,7 +1693,8 @@ function signupFormHtml(){
     <div class="field"><label>Email</label><input id="host-email" type="email" placeholder="you@email.com" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
     <div class="field"><label>Password</label><input id="host-pass" type="password" placeholder="At least 8 characters" /></div>
     <button class="primary-btn" onclick="submitSignup()">Create account</button>
-    <button class="link-btn" style="display:block;margin:14px auto 0" onclick="hostState.mode='login'; renderHost();">Already have an account? Log in</button>
+    <button class="link-btn" style="display:block;margin:14px auto 24px" onclick="hostState.mode='login'; renderHost();">Already have an account? Log in</button>
+    ${installAppSectionHtml() ? `<div class="profile-section">${installAppSectionHtml()}</div>` : ''}
     ${supportSectionHtml()}
   `;
 }
@@ -1637,7 +1708,8 @@ function loginFormHtml(){
     <div class="field"><label>Email</label><input id="login-email" type="email" placeholder="you@email.com" autocapitalize="off" autocorrect="off" spellcheck="false" /></div>
     <div class="field"><label>Password</label><input id="login-pass" type="password" placeholder="Your password" /></div>
     <button class="primary-btn" onclick="submitLogin()">Log in</button>
-    <button class="link-btn" style="display:block;margin:14px auto 0" onclick="hostState.mode='signup'; renderHost();">New here? Create an account</button>
+    <button class="link-btn" style="display:block;margin:14px auto 24px" onclick="hostState.mode='signup'; renderHost();">New here? Create an account</button>
+    ${installAppSectionHtml() ? `<div class="profile-section">${installAppSectionHtml()}</div>` : ''}
     ${supportSectionHtml()}
   `;
 }
@@ -1817,7 +1889,23 @@ function adminEventRow(ev){
     <button class="link-btn" style="display:block;margin-top:10px${ev.isMain ? ';color:var(--amber)' : ''}" onclick="adminSetMain(${ev.id})">${ev.isMain ? '★ Main event — tap to remove' : '☆ Set as main event'}</button>
     <button class="link-btn" style="display:block;margin-top:10px${ev.isHidden ? ';color:var(--danger)' : ''}" onclick="adminSetVisibility(${ev.id})">${ev.isHidden ? '🙈 Hidden — tap to show in Discover' : '👁 Visible — tap to hide from Discover'}</button>
     <button class="link-btn" style="display:block;margin-top:10px" onclick="makeEventPermanent(${ev.id})">Make a permanent part of the app →</button>
+    <button class="link-btn" style="display:block;margin-top:10px;color:var(--danger)" onclick="adminDeleteEvent(${ev.id}, '${escapeHtml(ev.title).replace(/'/g, "\\'")}')">Delete event</button>
   </div>`;
+}
+
+// Actually removes the row (unlike "hide", which just keeps it out of
+// Discover but leaves it here). The backend also records this so the
+// event can't silently reappear on the next Ticketmaster sync or seed
+// pass — see removed_events in db.js.
+async function adminDeleteEvent(id, title){
+  if(!confirm(`Delete "${title}"? This can't be undone.`)) return;
+  try{
+    await apiFetch('/api/events/admin/' + id, { method: 'DELETE' });
+    showToast('Deleted', `"${title}" was removed.`);
+    await renderAdminEvents();
+  } catch(err){
+    showToast("Couldn't delete", err.message);
+  }
 }
 
 // Hiding an event just keeps it out of the public Discover list — it's
@@ -1924,8 +2012,12 @@ async function renderAdminBlog(){
         <div class="field"><label>When (shown on the card)</label><input id="new-blog-when" type="text" placeholder="e.g. March 2021" /></div>
         <div class="field"><label>Short summary</label><textarea id="new-blog-summary" placeholder="One or two sentences for the card"></textarea></div>
         <div class="field"><label>Full write-up</label><textarea id="new-blog-body" placeholder="The full story"></textarea></div>
-        <div class="field"><label>Cover photo link (optional)</label><input id="new-blog-photo" type="url" placeholder="https://..." /></div>
         <div class="field"><label>Source link (optional)</label><input id="new-blog-source" type="url" placeholder="https://..." /></div>
+        <div class="field">
+          <label>Cover photo link (optional)</label>
+          <input id="new-blog-photo" type="url" placeholder="https://..." />
+          <button class="link-btn" style="display:block;margin-top:6px" onclick="useSitePictureForBlog(null)">Use site picture from source link ↑</button>
+        </div>
         <button class="primary-btn" onclick="createAdminBlogPost()">Publish post</button>
       </div>
     `;
@@ -1943,11 +2035,35 @@ function adminBlogRow(p){
     <div class="field"><label>When</label><input id="admin-blog-when-${p.id}" type="text" value="${escapeHtml(p.happenedOn || '')}" /></div>
     <div class="field"><label>Short summary</label><textarea id="admin-blog-summary-${p.id}">${escapeHtml(p.summary || '')}</textarea></div>
     <div class="field"><label>Full write-up</label><textarea id="admin-blog-body-${p.id}">${escapeHtml(p.body || '')}</textarea></div>
-    <div class="field"><label>Cover photo link</label><input id="admin-blog-photo-${p.id}" type="url" value="${escapeHtml(p.coverPhotoUrl || '')}" /></div>
     <div class="field"><label>Source link</label><input id="admin-blog-source-${p.id}" type="url" value="${escapeHtml(p.sourceUrl || '')}" /></div>
+    <div class="field">
+      <label>Cover photo link</label>
+      <input id="admin-blog-photo-${p.id}" type="url" value="${escapeHtml(p.coverPhotoUrl || '')}" />
+      <button class="link-btn" style="display:block;margin-top:6px" onclick="useSitePictureForBlog(${p.id})">Use site picture from source link ↑</button>
+    </div>
     <button class="primary-btn" onclick="saveAdminBlogPost(${p.id})">Save</button>
     <button class="link-btn" style="display:block;margin-top:10px;color:var(--danger)" onclick="deleteAdminBlogPost(${p.id}, '${escapeHtml(p.title).replace(/'/g, "\\'")}')">Delete post</button>
   </div>`;
+}
+
+// Pulls the source site's own preview image (og:image, or its favicon as
+// a fallback) and drops it straight into the Cover photo field — id is
+// null for the "new post" form, or a post id for an existing row's form.
+async function useSitePictureForBlog(id){
+  const sourceEl = document.getElementById(id ? 'admin-blog-source-' + id : 'new-blog-source');
+  const photoEl = document.getElementById(id ? 'admin-blog-photo-' + id : 'new-blog-photo');
+  const sourceUrl = sourceEl.value.trim();
+  if(!sourceUrl){
+    showToast('Add a source link first', 'The site picture is pulled from the source link above.');
+    return;
+  }
+  try{
+    const { imageUrl, siteName } = await apiFetch('/api/blog/site-preview?url=' + encodeURIComponent(sourceUrl));
+    photoEl.value = imageUrl;
+    showToast('Picture pulled from ' + siteName, 'Cover photo set — check it looks right before publishing.');
+  } catch(err){
+    showToast("Couldn't pull a picture", err.message);
+  }
 }
 
 async function createAdminBlogPost(){
@@ -2319,7 +2435,7 @@ function supportSectionHtml(){
       <a class="profile-row" href="mailto:letlhogonolomabalee@gmail.com">
         <span class="profile-row-icon">✉️</span>
         <span class="profile-row-label">Email us</span>
-        <span class="profile-row-value">letlhogonolomabalee@gmail.com</span>
+        <span class="profile-row-value">Tap to email us</span>
       </a>
       <a class="profile-row" href="https://wa.me/27710900739" target="_blank" rel="noopener">
         <span class="profile-row-icon">💬</span>

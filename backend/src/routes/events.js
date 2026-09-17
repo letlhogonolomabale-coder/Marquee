@@ -64,8 +64,17 @@ router.get('/', async (req, res, next) => {
     }
 
     const liveRows = await fetchLiveEvents(city);
-    for (const row of liveRows) {
-      await upsertLiveEvent.run(row);
+    if (liveRows.length > 0) {
+      // Skip anything an admin has explicitly deleted (see DELETE
+      // /admin/:id below) — otherwise a deleted live event just comes
+      // right back the next time this city is fetched.
+      const removedTmIds = new Set(
+        (await db.prepare('SELECT tm_id FROM removed_events WHERE tm_id IS NOT NULL').all()).map((r) => r.tm_id)
+      );
+      for (const row of liveRows) {
+        if (removedTmIds.has(row.tmId)) continue;
+        await upsertLiveEvent.run(row);
+      }
     }
 
     // is_main DESC first — the admin-picked (or auto-defaulted) featured
@@ -352,6 +361,32 @@ router.patch('/admin/:id', requireAuth, requireAdmin, async (req, res, next) => 
 
     const updated = await db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
     res.json({ event: toApiEvent(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/events/admin/:id — permanently remove an event. Unlike
+// /admin/:id/visibility (which just hides it from Discover but keeps the
+// row), this actually deletes it from the database, so it stops coming
+// back — including on the next Ticketmaster sync for events pulled from
+// there, since a deleted tm_id simply isn't in the table to match against
+// anymore and gets re-inserted as a fresh row next fetch. Anyone who had
+// it favorited loses that favorite too (ON DELETE CASCADE).
+router.delete('/admin/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const row = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Event not found.' });
+
+    // Record a tombstone first so this event can't silently come back on
+    // the next Ticketmaster sync (matched by tm_id) or app restart
+    // (matched by title+venue+city, same as the seed step uses).
+    await db.prepare('INSERT INTO removed_events (tm_id, fingerprint) VALUES (?, ?)').run(
+      row.tm_id || null,
+      db.fingerprintEvent(row.title, row.venue, row.city)
+    );
+    await db.prepare('DELETE FROM events WHERE id = ?').run(row.id);
+    res.json({ deleted: true });
   } catch (err) {
     next(err);
   }

@@ -5,6 +5,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { fetchSitePreview } = require('../utils/sitePreview');
 
 const router = express.Router();
 
@@ -28,6 +29,28 @@ router.get('/', async (req, res, next) => {
     res.json({ posts: rows.map(toApiPost) });
   } catch (err) {
     next(err);
+  }
+});
+
+// GET /api/blog/site-preview?url=... — fetches the source link and pulls
+// out that site's own og:image (falling back to its favicon), so the
+// admin can use it as the post's cover photo without hunting one down by
+// hand. Admin only, since it makes an outbound request on the admin's
+// behalf. Registered before GET /:id so "site-preview" isn't swallowed by
+// that param route.
+router.get('/site-preview', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const url = (req.query.url || '').trim();
+    if (!url || !/^https?:\/\//i.test(url)) {
+      return res.status(400).json({ error: 'Give a source link starting with http:// or https:// first.' });
+    }
+    const { imageUrl, siteName } = await fetchSitePreview(url);
+    if (!imageUrl) {
+      return res.status(404).json({ error: "Couldn't find a picture on that site." });
+    }
+    res.json({ imageUrl, siteName });
+  } catch (err) {
+    res.status(502).json({ error: "Couldn't reach that source link to pull a picture from it." });
   }
 });
 

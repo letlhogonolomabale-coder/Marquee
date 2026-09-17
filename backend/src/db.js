@@ -159,6 +159,23 @@ async function ensureSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON blog_posts(created_at);
+
+    -- A tombstone for events an admin has explicitly deleted (see
+    -- DELETE /api/events/admin/:id). Without this, a deleted event just
+    -- comes right back: Ticketmaster-sourced ones get re-upserted on the
+    -- next city fetch, and seed events get re-inserted on the next server
+    -- restart, since both of those only check "does this row exist yet".
+    -- Every removal is recorded here by tm_id (for live events) and/or a
+    -- title+venue+city fingerprint (for seed/host events), and both sync
+    -- paths skip anything that matches before they'd otherwise re-add it.
+    CREATE TABLE IF NOT EXISTS removed_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      tm_id        TEXT,
+      fingerprint  TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_removed_events_tm_id ON removed_events(tm_id);
+    CREATE INDEX IF NOT EXISTS idx_removed_events_fingerprint ON removed_events(fingerprint);
   `);
 
   // Lightweight migrations for DBs created before these columns existed —
@@ -177,6 +194,13 @@ async function ensureSchema() {
 
   const userColumns = (await prepare('PRAGMA table_info(users)').all()).map((c) => c.name);
   if (!userColumns.includes('is_admin')) await exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+}
+
+// Same fingerprint shape used by seedEvents' own findExisting query above
+// and by the removal check below, so a deletion always matches whichever
+// path would otherwise re-add the row.
+function fingerprintEvent(title, venue, city) {
+  return `${(title || '').trim().toLowerCase()}|${(venue || '').trim().toLowerCase()}|${city}`;
 }
 
 // ---- Seed sync ------------------------------------------------------------
@@ -202,6 +226,7 @@ async function seedEvents() {
         AND city = @city
       LIMIT 1
     `);
+    const findRemoved = tx('SELECT 1 FROM removed_events WHERE fingerprint = ? LIMIT 1');
     const unsetCityMain = tx('UPDATE events SET is_main = 0 WHERE is_main = 1 AND city = ?');
     const cityHasMain = tx('SELECT 1 FROM events WHERE city = ? AND is_main = 1 LIMIT 1');
     const backfillMain = tx(`
@@ -214,7 +239,8 @@ async function seedEvents() {
       const row = withDefaults(r);
       const idParams = { title: row.title, venue: row.venue, city: row.city };
       const existing = await findExisting.get(idParams);
-      if (!existing) {
+      const removed = await findRemoved.get(fingerprintEvent(row.title, row.venue, row.city));
+      if (!existing && !removed) {
         // `is_main: true` in seedEvents.js only takes effect the moment this
         // row is first created — an admin is free to change it afterwards
         // through the app without a later redeploy ever snapping it back.
@@ -289,4 +315,4 @@ function init() {
   return readyPromise;
 }
 
-module.exports = { prepare, exec, transaction, init, client };
+module.exports = { prepare, exec, transaction, init, client, fingerprintEvent };
