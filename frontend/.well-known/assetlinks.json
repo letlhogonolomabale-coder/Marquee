@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.onrender.marquee_app.twa",
+        "sha256_cert_fingerprints": ["72:97:B2:AF:16:F6:E4:E3:77:FC:4D:1D:03:11:76:25:04:FA:6D:2F:34:6A:92:20:CC:51:50:49:BD:B4:D8:1D"]
+      }
+    }]

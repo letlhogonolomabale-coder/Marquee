@@ -35,6 +35,12 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 // above to that frontend's URL.
 const FRONTEND_DIR = path.join(__dirname, '..', '..', 'frontend');
 app.use(express.static(FRONTEND_DIR, {
+  // Express's static middleware hides dotfiles/dot-directories by default
+  // (dotfiles: 'ignore'), which would silently 404 /.well-known/assetlinks.json
+  // — the file Android's Digital Asset Links check needs to verify this app
+  // owns the site, required for the TWA to drop its browser address bar and
+  // for the Play Store listing. Explicitly allow it.
+  dotfiles: 'allow',
   setHeaders: (res, filePath) => {
     // Never let the browser (or Render's edge) cache the service worker or
     // the HTML shell — that's what caused stale deploys. Everything else
