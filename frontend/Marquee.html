@@ -1694,8 +1694,8 @@ function signupFormHtml(){
     <div class="field"><label>Password</label><input id="host-pass" type="password" placeholder="At least 8 characters" /></div>
     <button class="primary-btn" onclick="submitSignup()">Create account</button>
     <button class="link-btn" style="display:block;margin:14px auto 24px" onclick="hostState.mode='login'; renderHost();">Already have an account? Log in</button>
-    ${installAppSectionHtml() ? `<div class="profile-section">${installAppSectionHtml()}</div>` : ''}
     ${supportSectionHtml()}
+    ${installAppSectionHtml() ? `<div class="profile-section">${installAppSectionHtml()}</div>` : ''}
   `;
 }
 
@@ -1709,8 +1709,8 @@ function loginFormHtml(){
     <div class="field"><label>Password</label><input id="login-pass" type="password" placeholder="Your password" /></div>
     <button class="primary-btn" onclick="submitLogin()">Log in</button>
     <button class="link-btn" style="display:block;margin:14px auto 24px" onclick="hostState.mode='signup'; renderHost();">New here? Create an account</button>
-    ${installAppSectionHtml() ? `<div class="profile-section">${installAppSectionHtml()}</div>` : ''}
     ${supportSectionHtml()}
+    ${installAppSectionHtml() ? `<div class="profile-section">${installAppSectionHtml()}</div>` : ''}
   `;
 }
 
