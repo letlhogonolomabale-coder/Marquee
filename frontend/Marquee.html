@@ -657,7 +657,14 @@
 
   /* toast notification */
   #toast-layer{
-    position:fixed;top:16px;left:50%;transform:translateX(-50%);
+    position:fixed;left:50%;transform:translateX(-50%);
+    /* 16px base spacing, PLUS the safe-area inset on notched iPhones —
+       without that second part, this sits at a flat 16px from the true
+       top of the screen, which lands right under the notch/Dynamic
+       Island (the phone's camera housing) since viewport-fit=cover above
+       draws the page edge-to-edge under it. env() with the 0px fallback
+       is a no-op on phones without a notch, so this is safe everywhere. */
+    top:calc(16px + env(safe-area-inset-top, 0px));
     z-index:80;
     display:flex;flex-direction:column;gap:8px;
     width:calc(100% - 36px);

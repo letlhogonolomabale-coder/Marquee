@@ -20,12 +20,34 @@ const upload = multer({
       cb(null, `id_${req.user.id}_${Date.now()}${ext}`);
     },
   }),
-  limits: { fileSize: 8 * 1024 * 1024 }, // 8MB
+  // Was 8MB — too small for a full-resolution photo straight from a modern
+  // phone camera (a single 12-48MP shot easily lands in the 10-20MB range),
+  // which meant real users hit this silently: their upload would fail with
+  // a cryptic "File too large" and no obvious next step. 20MB comfortably
+  // covers a real camera photo without opening the door to arbitrarily huge
+  // uploads.
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) return cb(new Error('ID upload must be an image.'));
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(Object.assign(new Error('ID upload must be an image (JPG, PNG, HEIC, etc).'), { status: 400 }));
+    }
     cb(null, true);
   },
 });
+
+// Wraps upload.single('idImage') so a rejected upload (too large, wrong
+// file type) reaches the client as a clear, friendly message instead of
+// Multer's raw error text — and with the right 400 status instead of
+// falling through to the generic 500 in the central error handler.
+function uploadIdImage(req, res, next) {
+  upload.single('idImage')(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: "That photo is too large — please use one under 20MB (most phones let you pick a lower quality/size when sharing)." });
+    }
+    return res.status(err.status || 400).json({ error: err.message || 'Could not process that upload.' });
+  });
+}
 
 function signToken(user) {
   return jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '30d' });
@@ -163,7 +185,7 @@ router.post('/host-info', requireAuth, async (req, res, next) => {
 //   3. Consider a dedicated ID-verification provider (Stripe Identity,
 //      Onfido, Persona) instead of manual photo review, for both liability
 //      and fraud-detection reasons at any real scale
-router.post('/verify-id', requireAuth, upload.single('idImage'), async (req, res, next) => {
+router.post('/verify-id', requireAuth, uploadIdImage, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No ID image uploaded.' });
 
