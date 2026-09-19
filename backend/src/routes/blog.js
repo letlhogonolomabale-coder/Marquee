@@ -137,10 +137,19 @@ router.patch('/:id', requireAuth, requireAdmin, async (req, res, next) => {
 });
 
 // DELETE /api/blog/:id — remove a post. Admin only.
+//
+// Records a tombstone first (same idea as DELETE /api/events/admin/:id) so
+// a seed post — e.g. one from seedBlog.js — doesn't just come back on the
+// next server restart. Without this, seedBlogPosts() only checks "does a
+// post with this title exist yet", which looks identical to "was this
+// deleted on purpose" once the row is gone.
 router.delete('/:id', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const result = await db.prepare('DELETE FROM blog_posts WHERE id = ?').run(req.params.id);
-    if (result.changes === 0) return res.status(404).json({ error: 'Post not found.' });
+    const row = await db.prepare('SELECT * FROM blog_posts WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Post not found.' });
+
+    await db.prepare('INSERT INTO removed_blog_posts (title) VALUES (?)').run(db.normalizeTitle(row.title));
+    await db.prepare('DELETE FROM blog_posts WHERE id = ?').run(row.id);
     res.json({ deleted: true });
   } catch (err) {
     next(err);

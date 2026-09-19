@@ -38,6 +38,10 @@ function publicUser(user) {
     email: user.email,
     verificationStatus: user.verification_status,
     isAdmin: !!user.is_admin,
+    hostOrgName: user.host_org_name,
+    hostPhone: user.host_phone,
+    hostEventTypes: user.host_event_types,
+    hostSocial: user.host_social,
   };
 }
 
@@ -113,6 +117,35 @@ router.get('/me', requireAuth, async (req, res, next) => {
   try {
     const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found.' });
+    res.json({ user: publicUser(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Step 1 of applying to host: a few questions about who they are and what
+// they run, collected BEFORE the ID upload step below. The frontend's apply
+// view checks hostOrgName (see publicUser() above) to decide which of the
+// two steps to show — once this is saved, it skips straight to the ID
+// upload on every future visit, so this only has to be filled in once.
+router.post('/host-info', requireAuth, async (req, res, next) => {
+  try {
+    const { orgName, phone, eventTypes, social } = req.body;
+    if (!orgName?.trim() || !phone?.trim()) {
+      return res.status(400).json({ error: 'Organizer/business name and a phone number are required.' });
+    }
+
+    await db.prepare(`
+      UPDATE users SET host_org_name = ?, host_phone = ?, host_event_types = ?, host_social = ? WHERE id = ?
+    `).run(
+      orgName.trim(),
+      phone.trim(),
+      eventTypes?.trim() || null,
+      social?.trim() || null,
+      req.user.id
+    );
+
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     res.json({ user: publicUser(user) });
   } catch (err) {
     next(err);

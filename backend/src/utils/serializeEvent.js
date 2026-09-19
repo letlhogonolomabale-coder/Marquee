@@ -4,6 +4,7 @@
 // missing url/photoUrl), so events opened from Favorites always fell back
 // to the Maps link even when a real one had been submitted.
 function toApiEvent(row) {
+  const isBoosted = !!(row.is_boosted && row.boost_expires_at && row.boost_expires_at >= new Date().toISOString());
   return {
     id: row.id,
     title: row.title,
@@ -24,6 +25,8 @@ function toApiEvent(row) {
     isMain: !!row.is_main,
     isHidden: !!row.is_hidden,
     eventDate: row.event_date,
+    isBoosted,
+    boostExpiresAt: row.boost_expires_at,
   };
 }
 

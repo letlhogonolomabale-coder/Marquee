@@ -5,6 +5,7 @@ const { geocodeVenue } = require('../utils/geocode');
 const { toApiEvent } = require('../utils/serializeEvent');
 const { fetchLiveEvents } = require('../utils/ticketmaster');
 const { parseEventDateText } = require('../utils/eventDate');
+const { initializeTransaction, verifyTransaction, BOOST_PRICE_CENTS, BOOST_DURATION_DAYS } = require('../utils/paystack');
 
 const router = express.Router();
 
@@ -78,8 +79,10 @@ router.get('/', async (req, res, next) => {
     }
 
     // is_main DESC first — the admin-picked (or auto-defaulted) featured
-    // event always sorts to row 0. After that, freshly-pulled live events
-    // sort just ahead of the original demo/editorial listings via
+    // event always sorts to row 0. Next, a host's paid boost (see POST
+    // /mine/:id/boost) — active only while boost_expires_at hasn't passed —
+    // bubbles up just under the main pick. After that, freshly-pulled live
+    // events sort just ahead of the original demo/editorial listings via
     // `(tm_id IS NULL)`, but — unlike before — demo events are never hidden
     // once live data exists for a city; everything for the city shows
     // together. Admin-hidden events (is_hidden = 1) are left out entirely,
@@ -89,7 +92,11 @@ router.get('/', async (req, res, next) => {
     const rows = await db.prepare(`
       SELECT * FROM events
       WHERE city = ? AND is_hidden = 0 AND (event_date IS NULL OR event_date >= datetime('now'))
-      ORDER BY is_main DESC, (tm_id IS NULL), created_at DESC
+      ORDER BY
+        is_main DESC,
+        (is_boosted = 1 AND boost_expires_at IS NOT NULL AND boost_expires_at >= datetime('now')) DESC,
+        (tm_id IS NULL),
+        created_at DESC
     `).all(city);
 
     const message = rows.length === 0
@@ -244,6 +251,73 @@ router.patch('/mine/:id', requireAuth, async (req, res, next) => {
     );
     const updated = await db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
     res.json({ event: toApiEvent(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/events/mine/:id/boost — start a Paystack transaction to
+// feature this event for BOOST_DURATION_DAYS. Scoped to events the caller
+// hosts. The event isn't marked boosted here — that only happens once
+// payment is confirmed, either by GET /mine/verify-boost (fast path, right
+// after the host is redirected back) or the webhook in routes/webhooks.js
+// (resilient path, fires even if they close the tab) — so an abandoned or
+// failed checkout never boosts anything for free.
+router.post('/mine/:id/boost', requireAuth, async (req, res, next) => {
+  try {
+    const row = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Event not found.' });
+    if (row.host_user_id !== req.user.id) {
+      return res.status(403).json({ error: "You can only boost events you've posted." });
+    }
+
+    const alreadyBoosted = row.is_boosted && row.boost_expires_at && row.boost_expires_at >= new Date().toISOString();
+    if (alreadyBoosted) {
+      return res.status(400).json({ error: `This event is already boosted until ${row.boost_expires_at}.` });
+    }
+
+    const host = await db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.id);
+    const baseUrl = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+    // Ours to pick, and prefixed so it's traceable at a glance in the
+    // Paystack dashboard even before metadata is parsed.
+    const reference = `boost_${row.id}_${Date.now()}`;
+
+    const { authorization_url } = await initializeTransaction({
+      email: host.email,
+      amountCents: BOOST_PRICE_CENTS,
+      reference,
+      metadata: { eventId: row.id },
+      callbackUrl: `${baseUrl}/`,
+    });
+
+    res.json({ url: authorization_url });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/events/mine/verify-boost?reference=... — called by the frontend
+// the moment a host lands back from Paystack's hosted payment page. Purely
+// for fast UI feedback; the webhook in routes/webhooks.js is the resilient
+// path that still boosts the event if the host closes their browser before
+// ever coming back here. Safe to call more than once — Paystack just
+// reports the transaction's current status either way, and the UPDATE
+// below is a plain overwrite, not an increment, so repeating it changes
+// nothing.
+router.get('/mine/verify-boost', requireAuth, async (req, res, next) => {
+  try {
+    const { reference } = req.query;
+    if (!reference) return res.status(400).json({ error: 'Missing reference.' });
+
+    const txn = await verifyTransaction(reference);
+    if (txn.status !== 'success') return res.json({ boosted: false });
+
+    const eventId = Number(txn.metadata?.eventId);
+    if (!eventId) return res.json({ boosted: false });
+
+    const expiresAt = new Date(Date.now() + BOOST_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await db.prepare('UPDATE events SET is_boosted = 1, boost_expires_at = ? WHERE id = ?').run(expiresAt, eventId);
+    res.json({ boosted: true, eventId, boostExpiresAt: expiresAt });
   } catch (err) {
     next(err);
   }

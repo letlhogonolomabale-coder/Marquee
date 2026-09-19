@@ -107,6 +107,15 @@ async function ensureSchema() {
       verification_status  TEXT NOT NULL DEFAULT 'none', -- none | pending | verified | rejected
       id_file_path         TEXT,
       is_admin             INTEGER NOT NULL DEFAULT 0,
+      -- Host application info, collected BEFORE the ID upload step (see
+      -- POST /api/auth/host-info) so a would-be host tells us who they are
+      -- and what they run before we ask for anything as sensitive as an ID
+      -- photo. host_org_name is what the apply-flow checks to decide
+      -- whether to show this step or skip straight to the ID upload.
+      host_org_name        TEXT,
+      host_phone           TEXT,
+      host_event_types     TEXT,
+      host_social          TEXT,
       created_at           TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -130,6 +139,8 @@ async function ensureSchema() {
       is_main       INTEGER NOT NULL DEFAULT 0, -- admin-picked featured event; at most one row is 1
       is_hidden     INTEGER NOT NULL DEFAULT 0, -- admin-hidden event; excluded from the public Discover list
       event_date    TEXT,                   -- best-effort parsed timestamp (ISO), used to detect past events; NULL = unknown, always treated as upcoming
+      is_boosted       INTEGER NOT NULL DEFAULT 0, -- host paid to feature this event (see POST /mine/:id/boost); sorts near the top of Discover while active
+      boost_expires_at TEXT,                       -- ISO timestamp the boost stops counting as active; NULL means "never boosted yet"
       created_at    TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE SET NULL
     );
@@ -176,6 +187,17 @@ async function ensureSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_removed_events_tm_id ON removed_events(tm_id);
     CREATE INDEX IF NOT EXISTS idx_removed_events_fingerprint ON removed_events(fingerprint);
+
+    -- Same tombstone idea as removed_events above, but for blog_posts: a
+    -- title deleted via DELETE /api/blog/:id is recorded here so
+    -- seedBlogPosts() (which only checks "does this title exist yet")
+    -- doesn't bring it right back on the next server restart/redeploy.
+    CREATE TABLE IF NOT EXISTS removed_blog_posts (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      title        TEXT NOT NULL,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_removed_blog_posts_title ON removed_blog_posts(title);
   `);
 
   // Lightweight migrations for DBs created before these columns existed —
@@ -191,9 +213,15 @@ async function ensureSchema() {
   if (!eventColumns.includes('is_main')) await exec('ALTER TABLE events ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0');
   if (!eventColumns.includes('is_hidden')) await exec('ALTER TABLE events ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0');
   if (!eventColumns.includes('event_date')) await exec('ALTER TABLE events ADD COLUMN event_date TEXT');
+  if (!eventColumns.includes('is_boosted')) await exec('ALTER TABLE events ADD COLUMN is_boosted INTEGER NOT NULL DEFAULT 0');
+  if (!eventColumns.includes('boost_expires_at')) await exec('ALTER TABLE events ADD COLUMN boost_expires_at TEXT');
 
   const userColumns = (await prepare('PRAGMA table_info(users)').all()).map((c) => c.name);
   if (!userColumns.includes('is_admin')) await exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+  if (!userColumns.includes('host_org_name')) await exec('ALTER TABLE users ADD COLUMN host_org_name TEXT');
+  if (!userColumns.includes('host_phone')) await exec('ALTER TABLE users ADD COLUMN host_phone TEXT');
+  if (!userColumns.includes('host_event_types')) await exec('ALTER TABLE users ADD COLUMN host_event_types TEXT');
+  if (!userColumns.includes('host_social')) await exec('ALTER TABLE users ADD COLUMN host_social TEXT');
 }
 
 // Same fingerprint shape used by seedEvents' own findExisting query above
@@ -281,11 +309,22 @@ async function seedEvents() {
   }
 }
 
+// Same normalization used for the findExisting/removed_blog_posts lookups
+// below, so a deletion always matches whichever title the reseed check
+// would otherwise use.
+function normalizeTitle(title) {
+  return (title || '').trim().toLowerCase();
+}
+
 // ---- Blog seed sync ---------------------------------------------------
 // Same idea as seedEvents() above, matched by title instead of
 // title+venue+city: only inserts posts that aren't already there, so admin
-// edits/deletes made through the Admin > Blog tab are never undone by a
-// later redeploy.
+// edits made through the Admin > Blog tab are never undone by a later
+// redeploy. Deletions are handled by removed_blog_posts (see DELETE
+// /api/blog/:id) — without checking that first, a deleted seed post would
+// simply get reinserted here on the very next restart, since as far as
+// this function can tell "not existing yet" looks identical to "was
+// deleted on purpose".
 async function seedBlogPosts() {
   const seed = require('./seedBlog');
   const insert = prepare(`
@@ -293,14 +332,16 @@ async function seedBlogPosts() {
     VALUES (@title, @happened_on, @summary, @body, @cover_photo_url, @source_url)
   `);
   const findExisting = prepare('SELECT 1 FROM blog_posts WHERE lower(trim(title)) = lower(trim(?)) LIMIT 1');
+  const findRemoved = prepare('SELECT 1 FROM removed_blog_posts WHERE title = ? LIMIT 1');
 
   let added = 0;
   for (const post of seed) {
     const existing = await findExisting.get(post.title);
-    if (!existing) {
-      await insert.run({ cover_photo_url: null, source_url: null, ...post });
-      added++;
-    }
+    if (existing) continue;
+    const removed = await findRemoved.get(normalizeTitle(post.title));
+    if (removed) continue;
+    await insert.run({ cover_photo_url: null, source_url: null, ...post });
+    added++;
   }
   if (added > 0) console.log(`Seeded ${added} new blog post(s) from seedBlog.js.`);
 }
@@ -315,4 +356,4 @@ function init() {
   return readyPromise;
 }
 
-module.exports = { prepare, exec, transaction, init, client, fingerprintEvent };
+module.exports = { prepare, exec, transaction, init, client, fingerprintEvent, normalizeTitle };

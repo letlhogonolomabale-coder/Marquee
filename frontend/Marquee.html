@@ -1555,8 +1555,27 @@ function renderHost(){
     return;
   }
 
-  // Applying to host: only relevant pre-verification, and only once the
-  // member has actively chosen to apply from their profile.
+  // Applying to host is two steps: tell us who you are/what you run first
+  // (host-info, below), THEN upload an ID photo (verify-id). currentUser
+  // .hostOrgName (set once host-info is submitted) is what decides which
+  // of the two the person sees — this persists server-side, so leaving and
+  // coming back later resumes at the ID-upload step, not from scratch.
+  if(hostState.view === 'apply' && currentUser.verificationStatus !== 'verified' && currentUser.verificationStatus !== 'pending' && !currentUser.hostOrgName){
+    c.innerHTML = `
+      <div class="host-hero">
+        <h3>Tell us about your events</h3>
+        <p>A few quick questions before the ID check — this helps us review applications faster.</p>
+      </div>
+      <div class="field"><label>Organizer / business name</label><input id="hi-org" type="text" placeholder="e.g. Rooftop Collective" /></div>
+      <div class="field"><label>Phone number</label><input id="hi-phone" type="tel" placeholder="e.g. 071 234 5678" /></div>
+      <div class="field"><label>What kind of events do you run? <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="hi-types" type="text" placeholder="e.g. Live music, rooftop parties" /></div>
+      <div class="field"><label>Instagram / website <span style="color:var(--muted);font-weight:400">(optional)</span></label><input id="hi-social" type="text" placeholder="e.g. instagram.com/yourpage" /></div>
+      <button class="primary-btn" onclick="submitHostInfo()">Continue</button>
+      <button class="link-btn" style="display:block;margin-top:16px" onclick="hostState.view='profile'; renderHost();">← Back to profile</button>
+    `;
+    return;
+  }
+
   if(hostState.view === 'apply' && currentUser.verificationStatus !== 'verified' && currentUser.verificationStatus !== 'pending'){
     c.innerHTML = `
       <div class="host-hero">
@@ -1765,6 +1784,31 @@ async function submitLogin(){
     renderHost();
   } catch(err){
     showToast("Couldn't log in", err.message);
+  }
+}
+
+// Step 1 of the apply flow — saves the host-info fields, then re-renders.
+// Once currentUser.hostOrgName is set, renderHost()'s apply branch (see
+// above) naturally falls through to the ID-upload step on its own; no
+// separate client-side "step" state to track.
+async function submitHostInfo(){
+  const orgName = document.getElementById('hi-org').value.trim();
+  const phone = document.getElementById('hi-phone').value.trim();
+  const eventTypes = document.getElementById('hi-types').value.trim();
+  const social = document.getElementById('hi-social').value.trim();
+  if(!orgName || !phone){
+    showToast('Almost there', 'Add an organizer/business name and a phone number to continue.');
+    return;
+  }
+  try{
+    const { user } = await apiFetch('/api/auth/host-info', {
+      method: 'POST',
+      body: JSON.stringify({ orgName, phone, eventTypes, social })
+    });
+    currentUser = user;
+    renderHost();
+  } catch(err){
+    showToast("Couldn't save", err.message);
   }
 }
 
@@ -2206,10 +2250,14 @@ async function adminDeleteUser(userId, name){
 }
 
 function hostedEventManageRow(ev){
+  const boostRow = ev.isBoosted
+    ? `<span class="status-pill verified">🔥 Boosted — until ${escapeHtml(formatBoostExpiry(ev.boostExpiresAt))}</span>`
+    : `<button class="link-btn" style="display:inline-block" onclick="boostEvent(${ev.id})">🔥 Boost this event — R5 / 7 days</button>`;
   return `
   <div class="host-hero" style="margin-bottom:14px">
     <h3 style="font-size:15px">${escapeHtml(ev.title)}</h3>
     <p>${escapeHtml(ev.venue)} · ${escapeHtml(ev.date)}</p>
+    <div style="margin:6px 0 10px">${boostRow}</div>
     <div class="field">
       <label>Event link</label>
       <input id="hosted-url-${ev.id}" type="url" placeholder="Link to the original listing" value="${escapeHtml(ev.url || '')}" />
@@ -2220,6 +2268,26 @@ function hostedEventManageRow(ev){
     </div>
     <button class="primary-btn" onclick="saveHostedEventLink(${ev.id})">Save</button>
   </div>`;
+}
+
+function formatBoostExpiry(iso){
+  if(!iso) return '';
+  try{ return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+  catch(e){ return iso; }
+}
+
+// Kicks off a Paystack transaction for boosting this event, then hands the
+// browser off to Paystack's hosted payment page. Coming back lands on
+// handleBoostRedirect() above, which checks GET /mine/verify-boost — the
+// event isn't actually marked boosted until that (or the webhook) confirms
+// payment, not here.
+async function boostEvent(id){
+  try{
+    const { url } = await apiFetch(`/api/events/mine/${id}/boost`, { method: 'POST' });
+    location.href = url;
+  } catch(err){
+    showToast("Couldn't start checkout", err.message);
+  }
 }
 
 async function saveHostedEventLink(id){
@@ -2446,10 +2514,39 @@ function supportSectionHtml(){
   `;
 }
 
+// Coming back from a boost payment (see boostEvent() below) lands here
+// with Paystack's own ?reference=...&trxref=... appended to whatever
+// callback_url we gave it. Unlike Stripe's separate success/cancel URLs,
+// Paystack redirects back here on every outcome — success, failure, or a
+// closed payment page — so we always ask the server to check (GET
+// /mine/verify-boost) rather than assuming success from the redirect alone.
+function handleBoostRedirect(){
+  const params = new URLSearchParams(location.search);
+  const reference = params.get('reference') || params.get('trxref');
+  if(!reference) return;
+
+  apiFetch(`/api/events/mine/verify-boost?reference=${encodeURIComponent(reference)}`)
+    .then(({ boosted }) => {
+      if(boosted){
+        showToast('Boost activated', "Your event is now featured near the top of Discover.");
+        loadMyHostedEvents().then(() => { if(hostState.view === 'profile') renderHost(); });
+      } else {
+        showToast('Payment not completed', 'No boost was applied — you can try again anytime.');
+      }
+    })
+    .catch(err => showToast("Couldn't confirm payment", err.message));
+
+  params.delete('reference');
+  params.delete('trxref');
+  const clean = location.pathname + (params.toString() ? '?' + params.toString() : '');
+  history.replaceState(null, '', clean);
+}
+
 // initial state
 bootstrapSession().then(() => {
   runScan();
   renderFavorites();
+  handleBoostRedirect();
 });
 </script>
 

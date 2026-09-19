@@ -9,6 +9,7 @@ const eventsRoutes = require('./routes/events');
 const favoritesRoutes = require('./routes/favorites');
 const adminRoutes = require('./routes/admin');
 const blogRoutes = require('./routes/blog');
+const webhookRoutes = require('./routes/webhooks');
 const { requireAuth, requireAdmin } = require('./middleware/auth');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change_this_to_a_long_random_string') {
@@ -17,6 +18,14 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change_this_to_a_long
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+
+// Paystack webhooks MUST be mounted before express.json() below, with the
+// raw body untouched — the HMAC signature check hashes the exact bytes
+// Paystack sent, so parsing to JSON first (which the rest of the app
+// wants) would make the signature never match. Everything else keeps
+// using express.json().
+app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRoutes);
+
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
