@@ -139,8 +139,9 @@ async function ensureSchema() {
       is_main       INTEGER NOT NULL DEFAULT 0, -- admin-picked featured event; at most one row is 1
       is_hidden     INTEGER NOT NULL DEFAULT 0, -- admin-hidden event; excluded from the public Discover list
       event_date    TEXT,                   -- best-effort parsed timestamp (ISO), used to detect past events; NULL = unknown, always treated as upcoming
-      is_boosted       INTEGER NOT NULL DEFAULT 0, -- host paid to feature this event (see POST /mine/:id/boost); sorts near the top of Discover while active
-      boost_expires_at TEXT,                       -- ISO timestamp the boost stops counting as active; NULL means "never boosted yet"
+      is_boosted       INTEGER NOT NULL DEFAULT 0, -- UNUSED: the boost feature was removed. Column kept so existing databases stay valid.
+      boost_expires_at TEXT,                       -- UNUSED: see is_boosted.
+      payment_status   TEXT NOT NULL DEFAULT 'paid', -- 'unpaid' = a host's event awaiting its R100 hosting fee (hidden from the public until paid); everything else is 'paid'
       created_at    TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE SET NULL
     );
@@ -155,6 +156,35 @@ async function ensureSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_events_city ON events(city);
+
+    -- Bars and lounges that pay for a Partner plan (R50 per 30 days). While
+    -- plan_expires_at is in the future, events whose venue matches name_key
+    -- (lowercased, trimmed) in the same city are highlighted in Discover
+    -- and search and rank higher.
+    CREATE TABLE IF NOT EXISTS venues (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_user_id   INTEGER NOT NULL,
+      name            TEXT NOT NULL,
+      name_key        TEXT NOT NULL,
+      city            TEXT NOT NULL,
+      kind            TEXT NOT NULL DEFAULT 'Bar',   -- Bar | Lounge | Club | Restaurant | Other
+      plan_expires_at TEXT,                          -- ISO timestamp; NULL = never paid
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (name_key, city),
+      FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_venues_owner ON venues(owner_user_id);
+
+    -- One row per Paystack transaction we've acted on. The reference is the
+    -- primary key, so the webhook and the browser-return check can both run
+    -- for the same payment without applying it twice.
+    CREATE TABLE IF NOT EXISTS payments (
+      reference     TEXT PRIMARY KEY,
+      kind          TEXT NOT NULL,      -- 'host_fee' | 'venue_plan'
+      ref_id        INTEGER NOT NULL,   -- event id or venue id
+      amount_cents  INTEGER NOT NULL,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
 
     CREATE TABLE IF NOT EXISTS blog_posts (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -215,6 +245,8 @@ async function ensureSchema() {
   if (!eventColumns.includes('event_date')) await exec('ALTER TABLE events ADD COLUMN event_date TEXT');
   if (!eventColumns.includes('is_boosted')) await exec('ALTER TABLE events ADD COLUMN is_boosted INTEGER NOT NULL DEFAULT 0');
   if (!eventColumns.includes('boost_expires_at')) await exec('ALTER TABLE events ADD COLUMN boost_expires_at TEXT');
+  // Existing rows default to 'paid' so everything already live stays live.
+  if (!eventColumns.includes('payment_status')) await exec("ALTER TABLE events ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'paid'");
 
   const userColumns = (await prepare('PRAGMA table_info(users)').all()).map((c) => c.name);
   if (!userColumns.includes('is_admin')) await exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');

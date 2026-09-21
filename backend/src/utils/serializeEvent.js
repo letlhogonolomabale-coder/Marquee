@@ -4,7 +4,6 @@
 // missing url/photoUrl), so events opened from Favorites always fell back
 // to the Maps link even when a real one had been submitted.
 function toApiEvent(row) {
-  const isBoosted = !!(row.is_boosted && row.boost_expires_at && row.boost_expires_at >= new Date().toISOString());
   return {
     id: row.id,
     title: row.title,
@@ -25,8 +24,8 @@ function toApiEvent(row) {
     isMain: !!row.is_main,
     isHidden: !!row.is_hidden,
     eventDate: row.event_date,
-    isBoosted,
-    boostExpiresAt: row.boost_expires_at,
+    paymentStatus: row.payment_status,        // 'paid' | 'unpaid' — unpaid hosted events are only visible to their host
+    isPartner: !!row.is_partner,              // set by queries that join venues; true while the venue's plan is active
   };
 }
 

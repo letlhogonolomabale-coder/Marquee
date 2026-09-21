@@ -8,16 +8,16 @@
 const fetch = require('node-fetch');
 const crypto = require('crypto');
 
-// Fixed boost price + duration, kept in one place so the checkout route and
-// the .env.example comments agree. Amount is in cents — ZAR's smallest
-// unit, same idea as Stripe's "amount in cents".
-const BOOST_PRICE_CENTS = Number(process.env.BOOST_PRICE_CENTS || 500); // R5.00 by default
-const BOOST_DURATION_DAYS = Number(process.env.BOOST_DURATION_DAYS || 7);
+// Fixed prices, kept in one place so the checkout routes and .env.example
+// agree. Amounts are in cents — ZAR's smallest unit.
+const HOST_FEE_CENTS = Number(process.env.HOST_FEE_CENTS || 10000);    // R100.00 per hosted event
+const VENUE_PLAN_CENTS = Number(process.env.VENUE_PLAN_CENTS || 5000); // R50.00 per venue plan period
+const VENUE_PLAN_DAYS = Number(process.env.VENUE_PLAN_DAYS || 30);    // one payment = 30 days of partner status
 
 function requireSecretKey() {
   const key = process.env.PAYSTACK_SECRET_KEY;
   if (!key) {
-    throw Object.assign(new Error("Boosting isn't configured yet — PAYSTACK_SECRET_KEY is missing on the server."), { status: 500 });
+    throw Object.assign(new Error("Payments aren't configured yet — PAYSTACK_SECRET_KEY is missing on the server."), { status: 500 });
   }
   return key;
 }
@@ -50,8 +50,8 @@ async function initializeTransaction({ email, amountCents, reference, metadata, 
 // once — Paystack just reports whatever the current status is each time.
 // Used right after the host is redirected back from checkout, as a fast
 // path alongside the webhook (see routes/webhooks.js) rather than instead
-// of it — the webhook is what still boosts the event if the host closes
-// their browser before the redirect completes.
+// of it — the webhook is what still activates the payment if the customer
+// closes their browser before the redirect completes.
 async function verifyTransaction(reference) {
   const key = requireSecretKey();
   const resp = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
@@ -75,4 +75,4 @@ function verifyWebhookSignature(rawBody, signatureHeader) {
   return expected === signatureHeader;
 }
 
-module.exports = { initializeTransaction, verifyTransaction, verifyWebhookSignature, BOOST_PRICE_CENTS, BOOST_DURATION_DAYS };
+module.exports = { initializeTransaction, verifyTransaction, verifyWebhookSignature, HOST_FEE_CENTS, VENUE_PLAN_CENTS, VENUE_PLAN_DAYS };
