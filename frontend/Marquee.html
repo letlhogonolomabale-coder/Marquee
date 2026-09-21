@@ -80,7 +80,7 @@
   html,body{margin:0;padding:0;}
   body,.topbar,.event,.hero-event,.past-card,.scan-box,.host-hero,.upload-box,.id-preview,
   .ride-opt,.sheet,#toast-layer .toast,.navtabs,.event-tag,.icon-btn,.status-pill,
-  .hero-event-tag,.trend-badge,.field input,.field select,.field textarea,.scan-row input{
+  .hero-event-tag,.trend-badge,.field input,.field select,.field textarea,.scan-row input,.search-row input{
     transition:background-color 0.35s ease, border-color 0.35s ease, color 0.35s ease, box-shadow 0.35s ease;
   }
   body{
@@ -285,7 +285,7 @@
     margin-bottom:22px;
   }
   .scan-row{display:flex;gap:8px;}
-  .scan-row input, .field input, .field select, .field textarea{
+  .scan-row input, .search-row input, .field input, .field select, .field textarea{
     flex:1;
     background:var(--surface-raised);
     border:1px solid var(--line);
@@ -297,8 +297,8 @@
     outline:none;
     width:100%;
   }
-  .scan-row input::placeholder, .field input::placeholder, .field textarea::placeholder{color:var(--muted);}
-  .scan-row input:focus, .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--amber-dim);}
+  .scan-row input::placeholder, .search-row input::placeholder, .field input::placeholder, .field textarea::placeholder{color:var(--muted);}
+  .scan-row input:focus, .search-row input:focus, .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--amber-dim);}
   .scan-btn, .primary-btn{
     background:linear-gradient(100deg, var(--amber), var(--magenta));
     color:var(--ink);
@@ -442,8 +442,13 @@
   }
   .hero-event.partner{border-color:var(--amber);box-shadow:0 0 0 1px rgba(var(--amber-rgb),0.55),0 10px 30px rgba(var(--amber-rgb),0.25);}
   .partner-badge{position:absolute;top:12px;right:12px;z-index:2;background:var(--amber);color:#111;font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;letter-spacing:0.02em;}
+  .section-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:0 0 14px;}
+  .section-tabs .filter-chip{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;border-radius:14px;font-size:11.5px;line-height:1.2;white-space:normal;text-align:center;}
+  .section-tabs .tab-emoji{font-size:19px;line-height:1;}
+  .venue-photo{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(var(--amber-rgb),0.30),var(--surface-raised)) !important;}
+  .venue-emoji{position:relative;z-index:1;font-size:46px;}
   .search-row{margin:0 0 14px;}
-  .search-row input{width:100%;}
+  .search-row input{width:100%;-webkit-appearance:none;appearance:none;}
   .hero-event-tag{
     position:absolute;top:12px;left:12px;z-index:2;
     display:inline-flex;align-items:center;gap:5px;
@@ -876,8 +881,10 @@
     </div>
     <div id="search-results"></div>
 
+    <div class="section-tabs" id="section-tabs" role="tablist" aria-label="What are you looking for?"></div>
+
     <div class="section-head">
-      <h2>Found nearby</h2>
+      <h2 id="found-heading">Found nearby</h2>
       <span class="count" id="found-count">0 events</span>
     </div>
     <div id="filter-bar"></div>
@@ -1160,6 +1167,8 @@ let selectedRideOption = 1;
 let blogRendered = false;
 let blogPosts = [];
 let activeCategory = 'All';
+let activeTab = 'events';   // 'events' | 'bars' | 'dining' | 'meetups'
+let foundVenues = [];       // listed (paying) venues for the current city
 let sortMode = 'soonest';
 let userVibes = new Set();
 let onboardingShown = false;
@@ -1209,6 +1218,8 @@ async function runScan(){
 
   try{
     const { city, events, message } = await apiFetch('/api/events?city=' + encodeURIComponent(locRaw));
+    foundVenues = city ? await fetchVenues(city) : [];
+    if(city) lastCity = city; // keep in step even when this city has no events (host form default, empty-state text)
     if(!city || events.length === 0){
       foundEvents = [];
       status.textContent = message || `No live coverage for "${loc}" yet — try a major South African city like Johannesburg, Cape Town, Durban or Pretoria.`;
@@ -1230,34 +1241,104 @@ function parsePrice(price){
   const m = price.match(/(\d+(\.\d+)?)/);
   return m ? parseFloat(m[1]) : Infinity;
 }
+// ---- tabs: Events | Bars & Lounges | Fine Dining | Meetups ----
+const SECTION_TABS = [['events','🎟️','Events'],['bars','🍸','Bars & Lounges'],['dining','🍽️','Fine Dining'],['meetups','🤝','Meetups']];
+const TAB_HEADINGS = { events:'Found nearby', bars:'Bars & lounges', dining:'Fine dining', meetups:'Meetups' };
+
+function renderSectionTabs(){
+  document.getElementById('section-tabs').innerHTML = SECTION_TABS.map(([k, emoji, label]) =>
+    `<button class="filter-chip ${k === activeTab ? 'active' : ''}" role="tab" aria-selected="${k === activeTab}" onclick="setTab('${k}')"><span class="tab-emoji">${emoji}</span><span>${label}</span></button>`).join('');
+}
+function setTab(t){ activeTab = t; activeCategory = 'All'; renderFound(); }
+function openVenueSignup(){ hostState.view = 'venue'; showPage('host'); }
+function openHostPage(){ hostState.view = 'profile'; showPage('host'); }
+
+async function fetchVenues(city){
+  try{
+    const { venues } = await apiFetch('/api/venues?city=' + encodeURIComponent(city));
+    return venues;
+  } catch(err){
+    console.warn('Could not load venues:', err.message);
+    return [];
+  }
+}
+
+// A listed bar, lounge or restaurant. Links go through data-url (escaped) rather
+// than being pasted into the onclick, so a venue name with a quote can't break out.
+function venueCard(v){
+  const emoji = v.section === 'dining' ? '🍽️' : (v.kind === 'Club' ? '🎧' : '🍸');
+  const mapsUrl = (v.lat != null && v.lng != null)
+    ? `https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v.name + ', ' + v.city)}`;
+  return `
+  <div class="hero-event partner">
+    <div class="hero-event-photo venue-photo">
+      <span class="venue-emoji">${emoji}</span>
+      <span class="hero-event-tag">${escapeHtml(v.kind)}</span>
+      <span class="partner-badge">⭐ Partner</span>
+    </div>
+    <div class="hero-event-body">
+      <p class="hero-event-title">${escapeHtml(v.name)}</p>
+      <p class="hero-event-loc">${escapeHtml(v.address || v.city)}</p>
+      ${v.description ? `<p class="hero-event-meta">${escapeHtml(v.description)}</p>` : ''}
+      <div class="hero-event-bottom">
+        <span class="hero-event-price">${escapeHtml(v.city)}</span>
+        <div class="event-actions">
+          <button class="icon-btn" data-url="${escapeAttr(mapsUrl)}" onclick="window.open(this.dataset.url,'_blank','noopener')" title="View on map">📍</button>
+          ${v.link ? `<button class="icon-btn" data-url="${escapeAttr(v.link)}" onclick="window.open(this.dataset.url,'_blank','noopener')" title="Website">🔗</button>` : ''}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderVenueTab(list, bar){
+  const dining = activeTab === 'dining';
+  const items = foundVenues.filter(v => (v.section === 'dining') === dining);
+  bar.innerHTML = '';
+  document.getElementById('found-count').textContent = items.length + (items.length === 1 ? ' place' : ' places');
+  const cta = `<div class="empty">Own ${dining ? 'a restaurant' : 'a bar or lounge'}? <button class="link-btn" style="display:inline-block" onclick="openVenueSignup()">Get listed — R50 / month</button></div>`;
+  list.innerHTML = items.length
+    ? items.map(venueCard).join('') + cta
+    : `<div class="empty">No ${dining ? 'fine dining spots' : 'bars or lounges'} listed in ${escapeHtml(lastCity)} yet.</div>` + cta;
+}
+
 function renderFound(){
+  renderSectionTabs();
+  document.getElementById('found-heading').textContent = TAB_HEADINGS[activeTab];
   const list = document.getElementById('found-list');
   const bar = document.getElementById('filter-bar');
-  document.getElementById('found-count').textContent = foundEvents.length + ' events';
+  if(activeTab === 'bars' || activeTab === 'dining'){ renderVenueTab(list, bar); return; }
 
-  if(foundEvents.length === 0){
-    list.innerHTML = `<div class="empty">No events found yet. Run a scan above.</div>`;
+  // Meetups are events with the Meetup category; the Events tab is everything else.
+  const pool = foundEvents.filter(e => activeTab === 'meetups' ? e.cat === 'Meetup' : e.cat !== 'Meetup');
+  document.getElementById('found-count').textContent = pool.length + (activeTab === 'meetups' ? (pool.length === 1 ? ' meetup' : ' meetups') : ' events');
+
+  if(pool.length === 0){
+    list.innerHTML = activeTab === 'meetups'
+      ? `<div class="empty">No meetups in ${escapeHtml(lastCity)} yet. <button class="link-btn" style="display:inline-block" onclick="openHostPage()">Host one</button></div>`
+      : `<div class="empty">No events found yet. Run a scan above.</div>`;
     bar.innerHTML = '';
     return;
   }
 
-  const cats = ['All', ...new Set(foundEvents.map(e => e.cat))];
+  const cats = ['All', ...new Set(pool.map(e => e.cat))];
   if(!cats.includes(activeCategory)) activeCategory = 'All';
   bar.innerHTML = `
-    <div class="filter-chips">
+    ${activeTab === 'events' ? `<div class="filter-chips">
       ${cats.map(c => `<button class="filter-chip ${c === activeCategory ? 'active' : ''}" onclick="setCategory('${c}')">${c}</button>`).join('')}
-    </div>
+    </div>` : ''}
     <select class="sort-select" onchange="setSort(this.value)" aria-label="Sort events">
       <option value="soonest" ${sortMode === 'soonest' ? 'selected' : ''}>Soonest</option>
       <option value="cheapest" ${sortMode === 'cheapest' ? 'selected' : ''}>Cheapest</option>
     </select>
   `;
 
-  // The admin's featured pick, if this city has one — pulled out and shown
+  // The admin's featured pick, if it belongs in this tab — pulled out and shown
   // as its own bigger banner above the regular list, and left out of the
   // regular list below so it doesn't also show up a second time.
-  const mainEvent = foundEvents.find(e => e.isMain);
-  let shown = activeCategory === 'All' ? [...foundEvents] : foundEvents.filter(e => e.cat === activeCategory);
+  const mainEvent = pool.find(e => e.isMain);
+  let shown = activeCategory === 'All' ? [...pool] : pool.filter(e => e.cat === activeCategory);
   if(mainEvent) shown = shown.filter(e => e.id !== mainEvent.id);
 
   if(sortMode === 'cheapest') shown.sort((a,b) => parsePrice(a.price) - parsePrice(b.price));
@@ -1651,11 +1732,14 @@ function renderHost(){
     c.innerHTML = `
       <div class="host-hero">
         <h3>Add your venue</h3>
-        <p>Bars and lounges pay R50 a month. While your plan is active, events at your venue are highlighted and ranked higher in Discover and search.</p>
+        <p>Bars, lounges and fine-dining restaurants pay R50 a month to be listed in their tab. Events at your venue are also highlighted and ranked higher in Discover and search.</p>
       </div>
       <div class="field"><label>Venue name</label><input id="venue-name" type="text" placeholder="Exactly as it appears on your events" /></div>
-      <div class="field"><label>Type</label><select id="venue-kind"><option>Bar</option><option>Lounge</option><option>Club</option><option>Restaurant</option><option>Other</option></select></div>
+      <div class="field"><label>Type</label><select id="venue-kind"><option>Bar</option><option>Lounge</option><option>Club</option><option>Fine Dining</option><option>Other</option></select></div>
       <div class="field"><label>City</label><select id="venue-city">${venueCityOptions}</select></div>
+      <div class="field"><label>About (optional)</label><textarea id="venue-desc" maxlength="500" placeholder="What makes your place special?"></textarea></div>
+      <div class="field"><label>Street address (optional)</label><input id="venue-address" type="text" placeholder="Helps the map pin land in the right spot" /></div>
+      <div class="field"><label>Website or Instagram link (optional)</label><input id="venue-link" type="url" placeholder="https://…" /></div>
       <button class="primary-btn" onclick="submitVenue()">Continue to checkout — R50</button>
       <button class="link-btn" style="display:block;margin-top:16px" onclick="hostState.view='profile'; renderHost();">← Back to profile</button>
     `;
@@ -2375,12 +2459,31 @@ function venueSectionHtml(){
       <div style="margin:6px 0 10px">${v.active
         ? `<span class="status-pill verified">⭐ Standing out until ${escapeHtml(formatShortDate(v.planExpiresAt))}</span>`
         : `<span class="status-pill pending">Plan not active</span>`}</div>
+      <div class="field"><label>About</label><textarea id="venue-desc-${v.id}" maxlength="500">${escapeHtml(v.description || '')}</textarea></div>
+      <div class="field"><label>Street address</label><input id="venue-addr-${v.id}" type="text" value="${escapeAttr(v.address || '')}" /></div>
+      <div class="field"><label>Website or Instagram link</label><input id="venue-link-${v.id}" type="url" value="${escapeAttr(v.link || '')}" /></div>
+      <button class="link-btn" style="display:inline-block;margin:0 0 10px" onclick="saveVenue(${v.id})">Save details</button><br>
       <button class="primary-btn" onclick="payVenuePlanClick(${v.id})">${v.active ? 'Add 30 days' : 'Activate'} — R50 / month</button>
     </div>`).join('');
   return `
-    <p class="hint" style="margin:2px 0 12px">Own a bar or lounge? For <b>R50 a month</b> your venue and its events stand out in Discover and search.</p>
+    <p class="hint" style="margin:2px 0 12px">Own a bar, lounge or restaurant? For <b>R50 a month</b> you're listed in your city's tab and your events stand out.</p>
     ${rows}
     <button class="link-btn" style="display:block" onclick="hostState.view='venue'; renderHost();">+ Add your venue</button>`;
+}
+async function saveVenue(id){
+  const description = document.getElementById('venue-desc-' + id).value.trim();
+  const address = document.getElementById('venue-addr-' + id).value.trim();
+  const link = document.getElementById('venue-link-' + id).value.trim();
+  try{
+    const { venue } = await apiFetch('/api/venues/' + id, { method: 'PATCH', body: JSON.stringify({ description, address, link }) });
+    const i = myVenues.findIndex(v => v.id === id);
+    if(i !== -1) myVenues[i] = venue;
+    foundVenues = await fetchVenues(lastCity);
+    renderFound();
+    showToast('Saved', 'Your venue details are updated.');
+  } catch(err){
+    showToast("Couldn't save", err.message);
+  }
 }
 async function payVenuePlan(id){
   const { url } = await apiFetch(`/api/venues/${id}/pay`, { method: 'POST' });
@@ -2394,9 +2497,12 @@ async function submitVenue(){
   const name = document.getElementById('venue-name').value.trim();
   const kind = document.getElementById('venue-kind').value;
   const city = document.getElementById('venue-city').value;
+  const description = document.getElementById('venue-desc').value.trim();
+  const address = document.getElementById('venue-address').value.trim();
+  const link = document.getElementById('venue-link').value.trim();
   if(name.length < 2){ showToast('Missing details', 'Enter your venue name.'); return; }
   try{
-    const { venue } = await apiFetch('/api/venues', { method: 'POST', body: JSON.stringify({ name, kind, city }) });
+    const { venue } = await apiFetch('/api/venues', { method: 'POST', body: JSON.stringify({ name, kind, city, description, address, link }) });
     hostState.view = 'profile';
     showToast('Almost there', 'Taking you to checkout for the R50 plan…');
     try{ await payVenuePlan(venue.id); }
@@ -2594,6 +2700,11 @@ function escapeHtml(str){
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
+}
+// escapeHtml leaves quotes alone (fine in text, unsafe inside an attribute value).
+// Use this whenever the result goes between quotes in an attribute.
+function escapeAttr(str){
+  return escapeHtml(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // Hides most of an email address by default, e.g. "je***@g***.com" — the

@@ -167,7 +167,12 @@ async function ensureSchema() {
       name            TEXT NOT NULL,
       name_key        TEXT NOT NULL,
       city            TEXT NOT NULL,
-      kind            TEXT NOT NULL DEFAULT 'Bar',   -- Bar | Lounge | Club | Restaurant | Other
+      kind            TEXT NOT NULL DEFAULT 'Bar',   -- Bar | Lounge | Club | Fine Dining | Other ('Restaurant' from the first release counts as Fine Dining)
+      description     TEXT,                          -- shown on the venue's card in the Bars & Lounges / Fine Dining tabs
+      address         TEXT,
+      link_url        TEXT,                          -- website or social page
+      lat             REAL,
+      lng             REAL,
       plan_expires_at TEXT,                          -- ISO timestamp; NULL = never paid
       created_at      TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (name_key, city),
@@ -247,6 +252,14 @@ async function ensureSchema() {
   if (!eventColumns.includes('boost_expires_at')) await exec('ALTER TABLE events ADD COLUMN boost_expires_at TEXT');
   // Existing rows default to 'paid' so everything already live stays live.
   if (!eventColumns.includes('payment_status')) await exec("ALTER TABLE events ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'paid'");
+
+  // Venue listing details were added after venues first shipped.
+  const venueColumns = (await prepare('PRAGMA table_info(venues)').all()).map((c) => c.name);
+  if (!venueColumns.includes('description')) await exec('ALTER TABLE venues ADD COLUMN description TEXT');
+  if (!venueColumns.includes('address')) await exec('ALTER TABLE venues ADD COLUMN address TEXT');
+  if (!venueColumns.includes('link_url')) await exec('ALTER TABLE venues ADD COLUMN link_url TEXT');
+  if (!venueColumns.includes('lat')) await exec('ALTER TABLE venues ADD COLUMN lat REAL');
+  if (!venueColumns.includes('lng')) await exec('ALTER TABLE venues ADD COLUMN lng REAL');
 
   const userColumns = (await prepare('PRAGMA table_info(users)').all()).map((c) => c.name);
   if (!userColumns.includes('is_admin')) await exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
