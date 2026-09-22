@@ -5,9 +5,12 @@
 // search and ranked higher — see the LEFT JOIN on venues in routes/events.js.
 const express = require('express');
 const db = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { matchCity } = require('../utils/cities');
 const { geocodeVenue } = require('../utils/geocode');
+const {
+  MAX_VENUE_PHOTOS, imageBody, checkUpload, imageUrl, isAdmin, overQuota, storeImage, deleteImage,
+} = require('../utils/images');
 const { initializeTransaction, VENUE_PLAN_CENTS, VENUE_PLAN_DAYS } = require('../utils/paystack');
 
 const router = express.Router();
@@ -33,7 +36,7 @@ function cleanDetails(body) {
   return { description, address, link: cleanLink };
 }
 
-function toApiVenue(row) {
+function toApiVenue(row, photos = []) {
   return {
     id: row.id,
     name: row.name,
@@ -45,10 +48,29 @@ function toApiVenue(row) {
     link: row.link_url,
     lat: row.lat,
     lng: row.lng,
+    photos,   // gallery, cover first: [{ id, url }]
     planExpiresAt: row.plan_expires_at,
     active: !!(row.plan_expires_at && row.plan_expires_at >= new Date().toISOString()),
   };
 }
+
+// Turns venue rows into API venues with their galleries attached, using one query
+// for all the photos (ids only — never the picture data itself).
+async function toApiVenues(rows) {
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.id);
+  const photoRows = await db
+    .prepare(`SELECT id, venue_id FROM images WHERE venue_id IN (${ids.map(() => '?').join(',')}) ORDER BY position ASC, id ASC`)
+    .all(...ids);
+  const byVenue = new Map();
+  for (const p of photoRows) {
+    if (!byVenue.has(p.venue_id)) byVenue.set(p.venue_id, []);
+    byVenue.get(p.venue_id).push({ id: p.id, url: imageUrl(p.id) });
+  }
+  return rows.map((r) => toApiVenue(r, byVenue.get(r.id) || []));
+}
+
+const oneApiVenue = async (id) => (await toApiVenues([await db.prepare('SELECT * FROM venues WHERE id = ?').get(id)]))[0];
 
 // GET /api/venues?city=Johannesburg&section=bars|dining — the venues listed in
 // a city's Bars & Lounges / Fine Dining tabs. Public. Only venues whose plan is
@@ -60,7 +82,7 @@ router.get('/', async (req, res, next) => {
     const rows = await db
       .prepare('SELECT * FROM venues WHERE city = ? AND plan_expires_at IS NOT NULL AND plan_expires_at >= ? ORDER BY created_at DESC, id DESC')
       .all(city, new Date().toISOString());
-    let venues = rows.map(toApiVenue);
+    let venues = await toApiVenues(rows);
     if (req.query.section === 'bars' || req.query.section === 'dining') {
       venues = venues.filter((x) => x.section === req.query.section);
     }
@@ -74,7 +96,7 @@ router.get('/', async (req, res, next) => {
 router.get('/mine', requireAuth, async (req, res, next) => {
   try {
     const rows = await db.prepare('SELECT * FROM venues WHERE owner_user_id = ? ORDER BY created_at DESC').all(req.user.id);
-    res.json({ venues: rows.map(toApiVenue), planPriceCents: VENUE_PLAN_CENTS, planDays: VENUE_PLAN_DAYS });
+    res.json({ venues: await toApiVenues(rows), planPriceCents: VENUE_PLAN_CENTS, planDays: VENUE_PLAN_DAYS, maxPhotos: MAX_VENUE_PHOTOS });
   } catch (err) {
     next(err);
   }
@@ -101,7 +123,7 @@ router.post('/', requireAuth, async (req, res, next) => {
       if (existing.owner_user_id !== req.user.id) {
         return res.status(409).json({ error: 'That venue is already registered by another account. Contact support if it\'s yours.' });
       }
-      return res.json({ venue: toApiVenue(existing) });
+      return res.json({ venue: await oneApiVenue(existing.id) });
     }
 
     // Best-effort map pin, same approach as hosted events: null if it can't be found.
@@ -109,8 +131,7 @@ router.post('/', requireAuth, async (req, res, next) => {
     const result = await db
       .prepare('INSERT INTO venues (owner_user_id, name, name_key, city, kind, description, address, link_url, lat, lng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(req.user.id, name, nameKey, city, kind, details.description, details.address, details.link, coords?.lat ?? null, coords?.lng ?? null);
-    const row = await db.prepare('SELECT * FROM venues WHERE id = ?').get(result.lastInsertRowid);
-    res.status(201).json({ venue: toApiVenue(row) });
+    res.status(201).json({ venue: await oneApiVenue(result.lastInsertRowid) });
   } catch (err) {
     next(err);
   }
@@ -136,8 +157,85 @@ router.patch('/:id', requireAuth, async (req, res, next) => {
     await db
       .prepare('UPDATE venues SET description = ?, address = ?, link_url = ?, lat = ?, lng = ? WHERE id = ?')
       .run(details.description, details.address, details.link, lat, lng, venue.id);
-    const updated = await db.prepare('SELECT * FROM venues WHERE id = ?').get(venue.id);
-    res.json({ venue: toApiVenue(updated) });
+    res.json({ venue: await oneApiVenue(venue.id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/venues/admin/all — every registered venue in every city (paid or not),
+// so an admin can manage any listing's photos.
+router.get('/admin/all', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const rows = await db.prepare('SELECT * FROM venues ORDER BY city, name').all();
+    res.json({ venues: await toApiVenues(rows), maxPhotos: MAX_VENUE_PHOTOS });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Loads a venue the caller may manage photos for — its owner, or any admin.
+// Sends the 404/403 itself and returns null when they may not.
+async function manageableVenue(req, res) {
+  const venue = await db.prepare('SELECT * FROM venues WHERE id = ?').get(req.params.id);
+  if (!venue) { res.status(404).json({ error: 'Venue not found.' }); return null; }
+  if (venue.owner_user_id !== req.user.id && !(await isAdmin(req.user.id))) {
+    res.status(403).json({ error: "You can only change photos on venues you've registered." });
+    return null;
+  }
+  return venue;
+}
+
+// POST /api/venues/:id/photos — add one picture to the gallery. The body is the
+// raw image (Content-Type image/jpeg | png | webp). Returns the updated venue.
+router.post('/:id/photos', requireAuth, imageBody, async (req, res, next) => {
+  try {
+    const venue = await manageableVenue(req, res);
+    if (!venue) return;
+    const check = checkUpload(req.body);
+    if (check.error) return res.status(400).json({ error: check.error });
+
+    const count = await db.prepare('SELECT COUNT(*) AS n FROM images WHERE venue_id = ?').get(venue.id);
+    if (Number(count.n) >= MAX_VENUE_PHOTOS) {
+      return res.status(400).json({ error: `A listing can have up to ${MAX_VENUE_PHOTOS} photos. Remove one to add another.` });
+    }
+    if (await overQuota(req.user.id)) {
+      return res.status(400).json({ error: "You've reached the upload limit for this account. Remove some old photos first." });
+    }
+
+    const last = await db.prepare('SELECT COALESCE(MAX(position), -1) AS p FROM images WHERE venue_id = ?').get(venue.id);
+    await storeImage({ buffer: req.body, mime: check.mime, userId: req.user.id, venueId: venue.id, position: Number(last.p) + 1 });
+    res.status(201).json({ venue: await oneApiVenue(venue.id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/venues/:id/photos/:imageId — remove one picture from the gallery.
+router.delete('/:id/photos/:imageId', requireAuth, async (req, res, next) => {
+  try {
+    const venue = await manageableVenue(req, res);
+    if (!venue) return;
+    const photo = await db.prepare('SELECT id FROM images WHERE id = ? AND venue_id = ?').get(req.params.imageId, venue.id);
+    if (!photo) return res.status(404).json({ error: 'Photo not found.' });
+    await deleteImage(photo.id);
+    res.json({ venue: await oneApiVenue(venue.id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/venues/:id/photos/:imageId/cover — make this picture the first one
+// shown (the cover of the gallery).
+router.post('/:id/photos/:imageId/cover', requireAuth, async (req, res, next) => {
+  try {
+    const venue = await manageableVenue(req, res);
+    if (!venue) return;
+    const photo = await db.prepare('SELECT id FROM images WHERE id = ? AND venue_id = ?').get(req.params.imageId, venue.id);
+    if (!photo) return res.status(404).json({ error: 'Photo not found.' });
+    const first = await db.prepare('SELECT MIN(position) AS p FROM images WHERE venue_id = ?').get(venue.id);
+    await db.prepare('UPDATE images SET position = ? WHERE id = ?').run(Number(first.p) - 1, photo.id);
+    res.json({ venue: await oneApiVenue(venue.id) });
   } catch (err) {
     next(err);
   }

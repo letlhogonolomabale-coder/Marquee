@@ -12,6 +12,7 @@ const blogRoutes = require('./routes/blog');
 const webhookRoutes = require('./routes/webhooks');
 const venuesRoutes = require('./routes/venues');
 const paymentsRoutes = require('./routes/payments');
+const imagesRoutes = require('./routes/images');
 const { requireAuth, requireAdmin } = require('./middleware/auth');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'change_this_to_a_long_random_string') {
@@ -35,6 +36,7 @@ app.use('/api/events', eventsRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api/venues', venuesRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/images', imagesRoutes);
 app.use('/api/admin', requireAuth, requireAdmin, adminRoutes);
 // Blog reading is public; writing is protected route-by-route inside blog.js
 // (POST/PATCH/DELETE each require an admin), not at the mount point here.

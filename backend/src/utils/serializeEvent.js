@@ -17,6 +17,7 @@ function toApiEvent(row) {
     lng: row.lng,
     photoKey: row.photo_key,
     photoUrl: row.photo_url,
+    photoUploaded: /^\/api\/images\/\d+$/.test(row.photo_url || ''),   // true when photoUrl is a picture uploaded to Marquee (vs. an external link)
     color: row.color,
     url: row.source_url,
     hosted: row.host_user_id !== null,

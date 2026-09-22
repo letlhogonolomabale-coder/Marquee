@@ -180,6 +180,25 @@ async function ensureSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_venues_owner ON venues(owner_user_id);
 
+    -- Uploaded pictures, stored in the database itself (Render's disk is wiped on
+    -- every redeploy; Turso is not). Served publicly by GET /api/images/:id — see
+    -- routes/images.js. venue_id set = one photo in that venue's gallery (ordered by
+    -- position); venue_id NULL = a hosted event's picture, referenced from
+    -- events.photo_url as '/api/images/<id>'. Never SELECT * from this table for
+    -- lists — the data column is the picture itself.
+    CREATE TABLE IF NOT EXISTS images (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      mime           TEXT NOT NULL,
+      data           BLOB NOT NULL,
+      uploader_id    INTEGER,
+      venue_id       INTEGER,
+      position       INTEGER NOT NULL DEFAULT 0,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_images_venue ON images(venue_id, position);
+    CREATE INDEX IF NOT EXISTS idx_images_uploader ON images(uploader_id);
+
     -- One row per Paystack transaction we've acted on. The reference is the
     -- primary key, so the webhook and the browser-return check can both run
     -- for the same payment without applying it twice.

@@ -6,7 +6,7 @@
 //
 // Bump CACHE_NAME whenever you change Marquee.html so old clients pick up
 // the new version instead of serving a cached copy forever.
-const CACHE_NAME = 'marquee-shell-v11';
+const CACHE_NAME = 'marquee-shell-v12';
 const SHELL_FILES = ['/', '/Marquee.html', '/manifest.json'];
 
 self.addEventListener('install', (event) => {

@@ -7,6 +7,9 @@ const { fetchLiveEvents } = require('../utils/ticketmaster');
 const { parseEventDateText } = require('../utils/eventDate');
 const { initializeTransaction, HOST_FEE_CENTS } = require('../utils/paystack');
 const { matchCity } = require('../utils/cities');
+const {
+  IMAGE_URL_RE, imageBody, checkUpload, imageUrl, isAdmin, overQuota, storeImage, deleteImageByUrl,
+} = require('../utils/images');
 
 const router = express.Router();
 
@@ -303,6 +306,53 @@ router.post('/mine/:id/pay', requireAuth, async (req, res, next) => {
   }
 });
 
+// POST /api/events/:id/photo — upload the event's picture. Allowed for the host
+// who posted the event and for any admin (who can also do it for live/demo
+// events). The body is the raw image (Content-Type image/jpeg | png | webp). It
+// replaces any earlier picture — an uploaded one is deleted, an external photo
+// link is simply overridden. Works before the hosting fee is paid, so a host can
+// finish the listing first.
+router.post('/:id/photo', requireAuth, imageBody, async (req, res, next) => {
+  try {
+    const row = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Event not found.' });
+    if (row.host_user_id !== req.user.id && !(await isAdmin(req.user.id))) {
+      return res.status(403).json({ error: "You can only change the picture on events you've posted." });
+    }
+    const check = checkUpload(req.body);
+    if (check.error) return res.status(400).json({ error: check.error });
+    if (await overQuota(req.user.id)) {
+      return res.status(400).json({ error: "You've reached the upload limit for this account. Remove some old photos first." });
+    }
+
+    const id = await storeImage({ buffer: req.body, mime: check.mime, userId: req.user.id });
+    await db.prepare('UPDATE events SET photo_url = ? WHERE id = ?').run(imageUrl(id), row.id);
+    await deleteImageByUrl(row.photo_url);
+    const updated = await db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
+    res.status(201).json({ event: toApiEvent(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/events/:id/photo — remove the event's picture; Discover falls back to
+// the category photo. Same permissions as the upload.
+router.delete('/:id/photo', requireAuth, async (req, res, next) => {
+  try {
+    const row = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Event not found.' });
+    if (row.host_user_id !== req.user.id && !(await isAdmin(req.user.id))) {
+      return res.status(403).json({ error: "You can only change the picture on events you've posted." });
+    }
+    await db.prepare('UPDATE events SET photo_url = NULL WHERE id = ?').run(row.id);
+    await deleteImageByUrl(row.photo_url);
+    const updated = await db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
+    res.json({ event: toApiEvent(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---- admin-only: full control over price, date and photo for any event ----
 
 // GET /api/events/admin/all — every event, across every city, for the admin panel.
@@ -376,7 +426,15 @@ router.patch('/admin/:id', requireAuth, requireAdmin, async (req, res, next) => 
     if (!row) return res.status(404).json({ error: 'Event not found.' });
 
     const { price, date, photoUrl, sourceUrl, venue, address } = req.body;
-    if (photoUrl && !/^https?:\/\//i.test(photoUrl.trim())) {
+    // The admin form sends the photo field back on every save, so an event's own
+    // uploaded picture ('/api/images/<id>') is accepted when it is unchanged. Any
+    // other internal path is refused — otherwise an admin could point one event at
+    // another's picture and delete it by replacing it later.
+    if (photoUrl && IMAGE_URL_RE.test(photoUrl.trim())) {
+      if (photoUrl.trim() !== row.photo_url) {
+        return res.status(400).json({ error: 'Use the Upload button to add a picture, or paste a full https:// link.' });
+      }
+    } else if (photoUrl && !/^https?:\/\//i.test(photoUrl.trim())) {
       return res.status(400).json({ error: 'Photo link must start with http:// or https://' });
     }
     if (sourceUrl && !/^https?:\/\//i.test(sourceUrl.trim())) {
@@ -401,17 +459,21 @@ router.patch('/admin/:id', requireAuth, requireAdmin, async (req, res, next) => 
       ? row.event_date
       : (parseEventDateText(newDateText)?.toISOString() ?? null);
 
+    const newPhotoUrl = photoUrl !== undefined ? (photoUrl.trim() || null) : row.photo_url;
     await db.prepare('UPDATE events SET price = ?, date_text = ?, event_date = ?, photo_url = ?, source_url = ?, venue = ?, lat = ?, lng = ? WHERE id = ?').run(
       price?.trim() || row.price,
       newDateText,
       newEventDate,
-      photoUrl !== undefined ? (photoUrl.trim() || null) : row.photo_url,
+      newPhotoUrl,
       sourceUrl !== undefined ? (sourceUrl.trim() || null) : row.source_url,
       venue?.trim() || row.venue,
       lat,
       lng,
       row.id
     );
+    // The admin replaced or cleared an uploaded picture with a link (or nothing):
+    // the stored copy is no longer used by anything.
+    if (newPhotoUrl !== row.photo_url) await deleteImageByUrl(row.photo_url);
 
     const updated = await db.prepare('SELECT * FROM events WHERE id = ?').get(row.id);
     res.json({ event: toApiEvent(updated) });
@@ -440,6 +502,7 @@ router.delete('/admin/:id', requireAuth, requireAdmin, async (req, res, next) =>
       db.fingerprintEvent(row.title, row.venue, row.city)
     );
     await db.prepare('DELETE FROM events WHERE id = ?').run(row.id);
+    await deleteImageByUrl(row.photo_url); // its uploaded picture, if it had one
     res.json({ deleted: true });
   } catch (err) {
     next(err);
