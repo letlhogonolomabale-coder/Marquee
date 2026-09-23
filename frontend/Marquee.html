@@ -471,6 +471,18 @@
   .lb-count{position:absolute;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom, 0px));text-align:center;color:#fff;font-size:13px;font-weight:600;}
   .lb-title{position:absolute;left:16px;top:calc(18px + env(safe-area-inset-top, 0px));right:60px;color:#fff;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
+  /* ---- zoom & crop tool (admin) ---- */
+  #crop-modal{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,0.85);display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;}
+  #crop-modal.open{display:flex;}
+  .crop-box{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;width:100%;max-width:380px;box-sizing:border-box;}
+  .crop-box h3{margin:0 0 12px;font-family:'Fraunces',serif;font-size:16px;font-weight:600;}
+  #crop-canvas{width:100%;aspect-ratio:1;border-radius:12px;background:#000;touch-action:none;cursor:grab;display:block;}
+  #crop-canvas:active{cursor:grabbing;}
+  .crop-zoom-row{display:flex;align-items:center;gap:10px;margin:14px 0 4px;}
+  .crop-zoom-row input[type=range]{flex:1;}
+  .crop-actions{display:flex;gap:10px;margin-top:14px;}
+  .crop-actions .primary-btn{flex:1;}
+
   /* ---- picture pickers (host / admin / venue owner) ---- */
   .photo-row{display:flex;align-items:center;gap:12px;margin:10px 0;}
   .photo-thumb{width:72px;height:54px;border-radius:9px;object-fit:cover;background:var(--surface-raised);border:1px solid var(--line);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--muted);}
@@ -479,9 +491,11 @@
   .vphotos-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:6px 0 4px;}
   .vphoto,.vphoto-add{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--surface-raised);border:1px solid var(--line);}
   .vphoto img{width:100%;height:100%;object-fit:cover;display:block;}
-  .vphoto-x,.vphoto-star{position:absolute;width:24px;height:24px;border-radius:50%;border:none;background:rgba(0,0,0,0.62);color:#fff;font-size:14px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;}
+  .vphoto-x,.vphoto-star,.vphoto-rotate,.vphoto-crop{position:absolute;width:24px;height:24px;border-radius:50%;border:none;background:rgba(0,0,0,0.62);color:#fff;font-size:14px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;}
   .vphoto-x{top:4px;right:4px;}
   .vphoto-star{bottom:4px;right:4px;font-size:12px;}
+  .vphoto-rotate{top:4px;left:4px;font-size:13px;}
+  .vphoto-crop{top:32px;left:4px;font-size:12px;}
   .vphoto-cover{position:absolute;left:4px;bottom:4px;background:var(--amber);color:#111;font-size:9.5px;font-weight:800;padding:2px 6px;border-radius:999px;letter-spacing:0.02em;}
   .vphoto-add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-style:dashed;color:var(--muted);font-family:inherit;font-size:10.5px;font-weight:600;cursor:pointer;padding:0;}
   .vphoto-add b{font-size:20px;line-height:1;font-weight:500;}
@@ -959,6 +973,24 @@
 
 <div id="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer"></div>
 
+<div id="crop-modal" role="dialog" aria-modal="true" aria-label="Zoom and crop photo">
+  <div class="crop-box">
+    <h3>Zoom &amp; crop</h3>
+    <canvas id="crop-canvas" width="320" height="320"
+      onpointerdown="cropPointerDown(event)" onpointermove="cropPointerMove(event)"
+      onpointerup="cropPointerUp(event)" onpointercancel="cropPointerUp(event)"></canvas>
+    <div class="crop-zoom-row">
+      <span aria-hidden="true">🔍</span>
+      <input type="range" id="crop-zoom" step="0.001" oninput="cropZoomChanged(this.value)" aria-label="Zoom">
+    </div>
+    <p class="hint" style="margin:2px 0 0">Drag the picture to reposition it, use the slider to zoom.</p>
+    <div class="crop-actions">
+      <button type="button" class="link-btn" onclick="closeCropTool()">Cancel</button>
+      <button type="button" class="primary-btn" id="crop-save-btn" onclick="saveCropTool()">Save crop</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ================= backend API client =================
 // Same origin as this page when served by the backend (see server.js);
@@ -1022,8 +1054,163 @@ async function shrinkImage(file, maxDim = 1600){
   return blob;
 }
 // Sends a (shrunk) picture as the raw request body. Returns the API's JSON.
-function apiUpload(path, blob){
-  return apiFetch(path, { method: 'POST', body: blob, headers: { 'Content-Type': blob.type || 'image/jpeg' } });
+// method defaults to POST (new upload); pass 'PATCH' to replace an existing
+// picture in place (used by the rotate and zoom/crop tools below).
+function apiUpload(path, blob, method = 'POST'){
+  return apiFetch(path, { method, body: blob, headers: { 'Content-Type': blob.type || 'image/jpeg' } });
+}
+
+// ---- rotate & zoom/crop: shared pixel helpers ----
+// Downloads a stored picture and decodes it off-DOM (never through an <img>
+// tag), so there's no canvas-tainting concern even when the frontend and API
+// are on different origins.
+async function fetchImageBitmap(url){
+  const resp = await fetch(mediaUrl(url), { cache: 'no-store' });
+  if(!resp.ok) throw new Error("Couldn't load that picture.");
+  return createImageBitmap(await resp.blob());
+}
+// Encodes a canvas as a JPEG, stepping quality down if needed to stay under
+// the server's 4 MB per-picture limit — same approach as shrinkImage above.
+async function canvasToJpeg(canvas){
+  const toBlobP = (q) => new Promise(res => canvas.toBlob(res, 'image/jpeg', q));
+  let q = 0.9, blob = await toBlobP(q);
+  while(blob && blob.size > 3.5 * 1024 * 1024 && q > 0.45){ q -= 0.15; blob = await toBlobP(q); }
+  if(!blob) throw new Error("Couldn't process that picture.");
+  return blob;
+}
+// Rotates a decoded picture 90° clockwise and re-encodes it.
+async function rotateBitmap90(bitmap){
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.height; canvas.height = bitmap.width;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+  return canvasToJpeg(canvas);
+}
+
+// ---- admin-only: zoom & crop tool ----
+// A square (1:1) crop — every place a photo is shown already crops to fit
+// with object-fit:cover, so a square export works well as source material
+// everywhere (gallery slides, thumbnails, event photo) without needing a
+// different tool per aspect ratio.
+const CROP_VIEW = 320;   // on-screen preview canvas, css px
+const CROP_OUT = 1080;   // exported picture size, px
+let cropState = null;    // { kind: 'venue'|'event', id, imageId, bitmap, scale, minScale, offsetX, offsetY }
+let cropDrag = null;
+
+// kind: 'venue' (id = venue id, imageId = photo id) or 'event' (id = event id, imageId unused).
+async function openCropTool(kind, id, imageId){
+  let url;
+  if(kind === 'venue'){
+    const v = venueById(id);
+    const p = v && (v.photos || []).find(x => x.id === imageId);
+    if(!p) return;
+    url = p.url;
+  } else {
+    const ev = adminEvents.find(e => e.id === id) || myHostedEvents.find(e => e.id === id);
+    if(!ev || !ev.photoUploaded) return;
+    url = ev.photoUrl;
+  }
+  try{
+    const bitmap = await fetchImageBitmap(url);
+    const minScale = Math.max(CROP_VIEW / bitmap.width, CROP_VIEW / bitmap.height);
+    cropState = { kind, id, imageId, bitmap, scale: minScale, minScale, offsetX: 0, offsetY: 0 };
+    const zoom = document.getElementById('crop-zoom');
+    zoom.min = minScale; zoom.max = minScale * 4; zoom.step = minScale / 200; zoom.value = minScale;
+    const btn = document.getElementById('crop-save-btn');
+    if(btn){ btn.disabled = false; btn.textContent = 'Save crop'; }
+    document.getElementById('crop-modal').classList.add('open');
+    paintCrop();
+  } catch(err){
+    showToast("Couldn't open the crop tool", err.message);
+  }
+}
+function paintCrop(){
+  if(!cropState) return;
+  const cv = document.getElementById('crop-canvas');
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, CROP_VIEW, CROP_VIEW);
+  const { bitmap, scale, offsetX, offsetY } = cropState;
+  const w = bitmap.width * scale, h = bitmap.height * scale;
+  const x = (CROP_VIEW - w) / 2 + offsetX;
+  const y = (CROP_VIEW - h) / 2 + offsetY;
+  ctx.drawImage(bitmap, x, y, w, h);
+}
+// Keeps the crop frame full of picture — never panned/zoomed out far enough
+// to show empty space at an edge.
+function clampCropOffset(){
+  const { bitmap, scale } = cropState;
+  const w = bitmap.width * scale, h = bitmap.height * scale;
+  const maxX = Math.max(0, (w - CROP_VIEW) / 2);
+  const maxY = Math.max(0, (h - CROP_VIEW) / 2);
+  cropState.offsetX = Math.max(-maxX, Math.min(maxX, cropState.offsetX));
+  cropState.offsetY = Math.max(-maxY, Math.min(maxY, cropState.offsetY));
+}
+function cropZoomChanged(v){
+  if(!cropState) return;
+  cropState.scale = parseFloat(v);
+  clampCropOffset();
+  paintCrop();
+}
+function cropCanvasScale(){
+  const cv = document.getElementById('crop-canvas');
+  return CROP_VIEW / cv.getBoundingClientRect().width;
+}
+function cropPointerDown(e){
+  if(!cropState) return;
+  cropDrag = { x: e.clientX, y: e.clientY, ox: cropState.offsetX, oy: cropState.offsetY };
+  e.currentTarget.setPointerCapture(e.pointerId);
+}
+function cropPointerMove(e){
+  if(!cropDrag || !cropState) return;
+  const s = cropCanvasScale();
+  cropState.offsetX = cropDrag.ox + (e.clientX - cropDrag.x) * s;
+  cropState.offsetY = cropDrag.oy + (e.clientY - cropDrag.y) * s;
+  clampCropOffset();
+  paintCrop();
+}
+function cropPointerUp(){ cropDrag = null; }
+function closeCropTool(){
+  document.getElementById('crop-modal').classList.remove('open');
+  cropState?.bitmap?.close?.();
+  cropState = null;
+  cropDrag = null;
+}
+async function saveCropTool(){
+  if(!cropState) return;
+  const { kind, id, imageId, bitmap, scale, offsetX, offsetY } = cropState;
+  const w = bitmap.width * scale, h = bitmap.height * scale;
+  const x = (CROP_VIEW - w) / 2 + offsetX;
+  const y = (CROP_VIEW - h) / 2 + offsetY;
+  const sw = CROP_VIEW / scale, sh = CROP_VIEW / scale;
+  const sx = Math.max(0, Math.min(bitmap.width - sw, -x / scale));
+  const sy = Math.max(0, Math.min(bitmap.height - sh, -y / scale));
+
+  const out = document.createElement('canvas');
+  out.width = CROP_OUT; out.height = CROP_OUT;
+  out.getContext('2d').drawImage(bitmap, sx, sy, sw, sh, 0, 0, CROP_OUT, CROP_OUT);
+
+  const btn = document.getElementById('crop-save-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  try{
+    const blob = await canvasToJpeg(out);
+    if(kind === 'venue'){
+      const { venue } = await apiUpload(`/api/venues/${id}/photos/${imageId}`, blob, 'PATCH');
+      setVenue(venue);
+      refreshVenuePhotos(id);
+      renderFound();
+    } else {
+      const { event } = await apiUpload(`/api/events/${id}/photo`, blob);
+      applyEventPhoto(event);
+    }
+    showToast('Photo updated', 'The crop is saved.');
+    closeCropTool();
+  } catch(err){
+    showToast("Couldn't save crop", err.message);
+    if(btn){ btn.disabled = false; btn.textContent = 'Save crop'; }
+  }
 }
 
 function setAuth(token, user){
@@ -1580,6 +1767,7 @@ function eventCard(ev, isFav){
       <p class="hero-event-title">${escapeHtml(ev.title)}</p>
       <p class="hero-event-loc">${escapeHtml(ev.venue)}</p>
       <p class="hero-event-meta">${ev.date}</p>
+      ${ev.description ? `<p class="hero-event-meta">${escapeHtml(ev.description)}</p>` : ''}
       <div class="hero-event-bottom">
         <span class="hero-event-price">${ev.price}</span>
         <div class="event-actions">
@@ -1913,14 +2101,15 @@ function renderHost(){
     c.innerHTML = `
       <div class="host-hero">
         <h3>Post an event</h3>
-        <p>It shows up in Discover once the R100 hosting fee is paid.</p>
+        <p>Meetups are free. Other events show up in Discover once the R100 hosting fee is paid.</p>
       </div>
       <div class="field"><label>Event title</label><input id="ev-title" type="text" placeholder="e.g. Rooftop Sunset Sessions" /></div>
       <div class="field"><label>Category</label>
-        <select id="ev-cat">
-          <option>Music</option><option>Travel</option><option>Food</option>
-          <option>Sport</option><option>Meetup</option><option>Market</option><option>Film</option>
+        <select id="ev-cat" onchange="updateHostFeeHint()">
+          <option>Meetup</option><option>Music</option><option>Travel</option><option>Food</option>
+          <option>Sport</option><option>Market</option><option>Film</option>
         </select>
+        <p class="hint" style="margin-top:6px">Meetups are free to post — everything else costs R100.</p>
       </div>
       <div class="field"><label>City</label><select id="ev-city">${cityOptions}</select></div>
       <div class="field"><label>Venue</label><input id="ev-venue" type="text" placeholder="Where's it happening?" /></div>
@@ -1933,12 +2122,13 @@ function renderHost(){
         <div id="ev-photo-slot"></div>
         <input type="file" id="ev-photo-file" accept="image/*" style="display:none" onchange="stageEventPhoto(this)" />
       </div>
-      <p class="hint" style="margin:4px 0 12px">Hosting an event costs <b>R100</b>, paid once at a secure Paystack checkout. Your event goes live as soon as the payment clears.</p>
-      <button class="primary-btn" id="ev-submit" onclick="submitHostedEvent()">Post event — R100</button>
+      <p class="hint" id="ev-fee-hint" style="margin:4px 0 12px"></p>
+      <button class="primary-btn" id="ev-submit" onclick="submitHostedEvent()">Post meetup — free</button>
       <button class="link-btn" style="display:block;margin-top:16px" onclick="hostState.view='profile'; renderHost();">← Back to profile</button>
     `;
     clearPendingEventPhoto();
     renderPendingEventPhoto();
+    updateHostFeeHint();
     return;
   }
 
@@ -2679,6 +2869,8 @@ function venuePhotoManagerInner(v, ctx){
     <div class="vphoto">
       <img src="${escapeAttr(mediaUrl(p.url))}" alt="Photo ${i + 1} of ${escapeAttr(v.name)}" loading="lazy">
       <button type="button" class="vphoto-x" onclick="deleteVenuePhoto(${v.id}, ${p.id})" aria-label="Remove photo ${i + 1}">×</button>
+      <button type="button" class="vphoto-rotate" onclick="rotateVenuePhoto(${v.id}, ${p.id})" aria-label="Rotate photo ${i + 1}" title="Rotate 90°">⟳</button>
+      ${ctx === 'admin' ? `<button type="button" class="vphoto-crop" onclick="openCropTool('venue', ${v.id}, ${p.id})" aria-label="Zoom and crop photo ${i + 1}" title="Zoom &amp; crop">✂</button>` : ''}
       ${i === 0
         ? '<span class="vphoto-cover">Cover</span>'
         : `<button type="button" class="vphoto-star" onclick="makeVenueCover(${v.id}, ${p.id})" aria-label="Make photo ${i + 1} the cover" title="Make cover photo">★</button>`}
@@ -2754,6 +2946,25 @@ async function deleteVenuePhoto(id, imageId){
   } catch(err){
     showToast("Couldn't remove photo", err.message);
   }
+}
+// Rotates one venue gallery photo 90° clockwise: downloads it, rotates it on
+// a canvas, and PATCHes the result back in place (same id's slot, new bytes).
+async function rotateVenuePhoto(id, imageId){
+  const v = venueById(id);
+  const p = v && (v.photos || []).find(x => x.id === imageId);
+  if(!p) return;
+  setVenuePhotoStatus(id, 'Rotating…');
+  try{
+    const bitmap = await fetchImageBitmap(p.url);
+    const blob = await rotateBitmap90(bitmap);
+    bitmap.close?.();
+    const { venue } = await apiUpload(`/api/venues/${id}/photos/${imageId}`, blob, 'PATCH');
+    setVenue(venue);
+    renderFound();
+  } catch(err){
+    showToast("Couldn't rotate photo", err.message);
+  }
+  refreshVenuePhotos(id);
 }
 async function makeVenueCover(id, imageId){
   try{
@@ -2872,6 +3083,10 @@ async function submitVenue(){
 // ctx is 'host' (Account → Your hosted events) or 'admin' (Admin → Events).
 function eventPhotoBlockHtml(ev, ctx){
   const has = !!ev.photoUrl;
+  // Rotate/crop transform the picture Marquee itself stores — they don't make
+  // sense (and there's nothing to download-and-re-upload) for an external
+  // https:// link an admin pasted in instead of uploading.
+  const canTransform = has && ev.photoUploaded;
   const fileId = `evphoto-file-${ctx}-${ev.id}`;
   const thumb = has
     ? `<img class="photo-thumb" src="${escapeAttr(mediaUrl(ev.photoUrl))}" alt="Photo for ${escapeAttr(ev.title)}">`
@@ -2889,6 +3104,8 @@ function eventPhotoBlockHtml(ev, ctx){
       ${thumb}
       <div class="photo-actions">
         <button type="button" class="link-btn" onclick="document.getElementById('${fileId}').click()">${has ? 'Change photo' : '＋ Upload a photo'}</button>
+        ${canTransform ? `<button type="button" class="link-btn" onclick="rotateEventPhoto(${ev.id})">Rotate 90°</button>` : ''}
+        ${canTransform && ctx === 'admin' ? `<button type="button" class="link-btn" onclick="openCropTool('event', ${ev.id}, 0)">Zoom &amp; crop</button>` : ''}
         ${has ? `<button type="button" class="link-btn danger" onclick="removeEventPhoto(${ev.id})">Remove photo</button>` : ''}
       </div>
     </div>
@@ -2920,6 +3137,24 @@ async function uploadEventPhoto(id, input){
     showToast('Photo saved', 'The event now shows your picture.');
   } catch(err){
     showToast("Couldn't upload photo", err.message);
+  }
+}
+// Rotates an event's own picture 90° clockwise the same way rotateVenuePhoto
+// does, then saves it through the normal "upload a photo" endpoint — which
+// already replaces whatever picture was there before.
+async function rotateEventPhoto(id){
+  const ev = adminEvents.find(e => e.id === id) || myHostedEvents.find(e => e.id === id);
+  if(!ev || !ev.photoUploaded) return;
+  showToast('Rotating…', 'Just a moment.');
+  try{
+    const bitmap = await fetchImageBitmap(ev.photoUrl);
+    const blob = await rotateBitmap90(bitmap);
+    bitmap.close?.();
+    const { event } = await apiUpload(`/api/events/${id}/photo`, blob);
+    applyEventPhoto(event);
+    showToast('Photo rotated', 'The event now shows the rotated picture.');
+  } catch(err){
+    showToast("Couldn't rotate photo", err.message);
   }
 }
 async function removeEventPhoto(id){
@@ -2977,6 +3212,20 @@ async function saveHostedEventLink(id){
   }
 }
 
+// Keeps the post-form's fee hint and button truthful as the host changes
+// category — Meetup is free, everything else is the R100 hosting fee.
+function updateHostFeeHint(){
+  const sel = document.getElementById('ev-cat');
+  const btn = document.getElementById('ev-submit');
+  const hint = document.getElementById('ev-fee-hint');
+  if(!sel || !btn || !hint) return;
+  const isMeetup = sel.value === 'Meetup';
+  btn.textContent = isMeetup ? 'Post meetup — free' : 'Post event — R100';
+  hint.innerHTML = isMeetup
+    ? 'Meetups are free to post — it goes live in Discover as soon as you submit.'
+    : 'Hosting this event costs <b>R100</b>, paid once at a secure Paystack checkout. It goes live as soon as the payment clears.';
+}
+
 async function submitHostedEvent(){
   const title = document.getElementById('ev-title').value.trim();
   const venue = document.getElementById('ev-venue').value.trim();
@@ -3024,7 +3273,7 @@ async function submitHostedEvent(){
       }
     }
     if(city === lastCity) foundEvents.unshift(event);
-    showToast('Event posted', `${title} is now live in Discover.`);
+    showToast(cat === 'Meetup' ? 'Meetup posted' : 'Event posted', `${title} is now live in Discover.`);
     renderFound();
     renderHost();
   } catch(err){

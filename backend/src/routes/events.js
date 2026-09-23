@@ -166,7 +166,7 @@ router.get('/:id', async (req, res, next) => {
 // POST /api/events — only verified hosts can post. A new event is saved as
 // 'unpaid' and stays hidden from Discover until the R100 hosting fee is paid
 // (POST /mine/:id/pay, confirmed by the webhook or /api/payments/verify).
-// Admins post for free.
+// Admins post for free, and so does anyone posting a Meetup.
 router.post('/', requireAuth, async (req, res, next) => {
   try {
     const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
@@ -210,7 +210,7 @@ router.post('/', requireAuth, async (req, res, next) => {
         coords?.lng ?? null,
         '#FFB454',
         url?.trim() || null,
-        user.is_admin ? 'paid' : 'unpaid'
+        (user.is_admin || cat === 'Meetup') ? 'paid' : 'unpaid'
       );
 
     const row = await db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid);
@@ -321,7 +321,12 @@ router.post('/:id/photo', requireAuth, imageBody, async (req, res, next) => {
     }
     const check = checkUpload(req.body);
     if (check.error) return res.status(400).json({ error: check.error });
-    if (await overQuota(req.user.id)) {
+    // A rotate/crop (or "Change photo") on an event that already has its OWN
+    // uploaded picture is a like-for-like swap, not a net addition — the old
+    // one is deleted right below — so it shouldn't be blocked by the quota
+    // even when the account is sitting right at its limit.
+    const isReplacingOwnUpload = IMAGE_URL_RE.test(row.photo_url || '');
+    if (!isReplacingOwnUpload && await overQuota(req.user.id)) {
       return res.status(400).json({ error: "You've reached the upload limit for this account. Remove some old photos first." });
     }
 
