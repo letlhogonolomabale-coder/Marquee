@@ -2445,16 +2445,59 @@ async function renderAdminVenues(){
     c.innerHTML = `<p class="hint">Couldn't load venues — ${escapeHtml(err.message)}</p>`;
   }
 }
+// Small badge + Approve/Reject controls shared by the admin Events and
+// Venues rows. `onApprove`/`onReject` are the JS calls to run (already
+// carrying the right id), so this one function serves both.
+function approvalControlsHtml(status, onApprove, onReject){
+  const badge = status === 'pending'
+    ? '<span class="status-pill pending">Pending review</span>'
+    : status === 'rejected'
+      ? '<span class="status-pill rejected">✕ Rejected</span>'
+      : '<span class="status-pill verified">✓ Approved</span>';
+  const buttons = status === 'approved'
+    ? `<button class="link-btn" style="display:inline-block;margin-left:8px;color:var(--danger)" onclick="${onReject}">Reject</button>`
+    : `<button class="link-btn" style="display:inline-block;margin-left:8px;color:var(--teal)" onclick="${onApprove}">Approve</button>
+       ${status === 'pending' ? `<button class="link-btn" style="display:inline-block;margin-left:8px;color:var(--danger)" onclick="${onReject}">Reject</button>` : ''}`;
+  return `<div style="margin:6px 0 10px">${badge}${buttons}</div>`;
+}
+
+async function adminReviewVenue(id, action){
+  try{
+    const { venue } = await apiFetch(`/api/venues/admin/${id}/${action}`, { method: 'POST' });
+    showToast(action === 'approve' ? 'Venue approved' : 'Venue rejected',
+      action === 'approve' ? `"${venue.name}" can now appear in its tab once its plan is active.` : `"${venue.name}" is turned down — it stays off the public tabs.`);
+    await renderAdminVenues();
+  } catch(err){
+    showToast("Couldn't update", err.message);
+  }
+}
+
 function adminVenueRow(v){
   return `
   <div class="host-hero" style="margin-bottom:14px">
     <h3 style="font-size:15px">${escapeHtml(v.name)}</h3>
     <p>${escapeHtml(v.kind)} · ${escapeHtml(v.city)}</p>
+    ${approvalControlsHtml(v.approvalStatus, `adminReviewVenue(${v.id}, 'approve')`, `adminReviewVenue(${v.id}, 'reject')`)}
     <div style="margin:6px 0 10px">${v.active
       ? `<span class="status-pill verified">⭐ Listed until ${escapeHtml(formatShortDate(v.planExpiresAt))}</span>`
       : '<span class="status-pill pending">Plan not active — not listed</span>'}</div>
     <div class="field" id="venue-photos-admin-${v.id}">${venuePhotoManagerInner(v, 'admin')}</div>
+    <button class="link-btn" style="display:block;margin-top:10px;color:var(--danger)" onclick="adminDeleteVenue(${v.id}, '${escapeHtml(v.name).replace(/'/g, "\\'")}')">Delete venue</button>
   </div>`;
+}
+
+// Permanently removes the row and its photos — unlike Reject (which just
+// keeps it off the public tabs but leaves it here, editable and re-approvable
+// later), this can't be undone. Confirms first for exactly that reason.
+async function adminDeleteVenue(id, name){
+  if(!confirm(`Delete "${name}"? This can't be undone — its listing and photos are gone for good. Events already posted at this venue are unaffected.`)) return;
+  try{
+    await apiFetch('/api/venues/admin/' + id, { method: 'DELETE' });
+    showToast('Deleted', `"${name}" was removed.`);
+    await renderAdminVenues();
+  } catch(err){
+    showToast("Couldn't delete", err.message);
+  }
 }
 
 function adminEventRow(ev){
@@ -2462,6 +2505,7 @@ function adminEventRow(ev){
   <div class="host-hero" style="margin-bottom:14px${ev.isMain ? ';border-color:var(--amber)' : ''}${ev.isHidden ? ';opacity:0.55' : ''}">
     <h3 style="font-size:15px">${ev.isMain ? '★ ' : ''}${ev.isHidden ? '🙈 ' : ''}${escapeHtml(ev.title)}</h3>
     <p>${escapeHtml(ev.venue)} · ${escapeHtml(ev.city)}${ev.isHidden ? ' · Hidden from Discover' : ''}</p>
+    ${approvalControlsHtml(ev.approvalStatus, `adminReviewEvent(${ev.id}, 'approve')`, `adminReviewEvent(${ev.id}, 'reject')`)}
     <div class="field"><label>Price</label><input id="admin-price-${ev.id}" type="text" value="${escapeHtml(ev.price)}" /></div>
     <div class="field"><label>Date & time</label><input id="admin-date-${ev.id}" type="text" value="${escapeHtml(ev.date)}" /></div>
     <div id="evphoto-admin-${ev.id}">${eventPhotoBlockHtml(ev, 'admin')}</div>
@@ -2509,6 +2553,17 @@ async function adminSetVisibility(id){
 // of Discover) at a time — picking a new one automatically un-picks
 // whichever one had it before, so admins never need to remember to clear
 // the old one first.
+async function adminReviewEvent(id, action){
+  try{
+    const { event } = await apiFetch(`/api/events/admin/${id}/${action}`, { method: 'POST' });
+    showToast(action === 'approve' ? 'Event approved' : 'Event rejected',
+      action === 'approve' ? `"${event.title}" can now go live once its fee is paid.` : `"${event.title}" is turned down — it stays out of Discover.`);
+    await renderAdminEvents();
+  } catch(err){
+    showToast("Couldn't update", err.message);
+  }
+}
+
 async function adminSetMain(id){
   try{
     const { event } = await apiFetch('/api/events/admin/' + id + '/main', { method: 'POST' });
@@ -2793,9 +2848,20 @@ async function adminDeleteUser(userId, name){
 }
 
 function hostedEventManageRow(ev){
-  const liveRow = ev.paymentStatus === 'unpaid'
-    ? `<span class="status-pill pending">Not live yet — hosting fee unpaid</span> <button class="link-btn" style="display:inline-block;margin-left:6px" onclick="payHostFeeClick(${ev.id})">Pay R100 to publish</button>`
-    : `<span class="status-pill verified">✓ Live in Discover</span>`;
+  // Discover requires BOTH: the hosting fee paid (or the event is a free
+  // Meetup) AND admin approval. Whichever is still outstanding is what the
+  // host sees here — payment first, since approving an unpaid event
+  // wouldn't make it visible anyway.
+  let liveRow;
+  if(ev.paymentStatus === 'unpaid'){
+    liveRow = `<span class="status-pill pending">Not live yet — hosting fee unpaid</span> <button class="link-btn" style="display:inline-block;margin-left:6px" onclick="payHostFeeClick(${ev.id})">Pay R100 to publish</button>`;
+  } else if(ev.approvalStatus === 'pending'){
+    liveRow = `<span class="status-pill pending"><span class="spin"></span> Pending admin review</span>`;
+  } else if(ev.approvalStatus === 'rejected'){
+    liveRow = `<span class="status-pill rejected">✕ Not approved — contact support</span>`;
+  } else {
+    liveRow = `<span class="status-pill verified">✓ Live in Discover</span>`;
+  }
   return `
   <div class="host-hero" style="margin-bottom:14px">
     <h3 style="font-size:15px">${escapeHtml(ev.title)}</h3>
@@ -2843,9 +2909,12 @@ function venueSectionHtml(){
     <div class="host-hero" style="margin-bottom:10px">
       <h3 style="font-size:15px">${escapeHtml(v.name)}</h3>
       <p>${escapeHtml(v.kind)} · ${escapeHtml(v.city)}</p>
-      <div style="margin:6px 0 10px">${v.active
-        ? `<span class="status-pill verified">⭐ Standing out until ${escapeHtml(formatShortDate(v.planExpiresAt))}</span>`
-        : `<span class="status-pill pending">Plan not active</span>`}</div>
+      <div style="margin:6px 0 10px">${(() => {
+        if(v.approvalStatus === 'rejected') return '<span class="status-pill rejected">✕ Not approved — contact support</span>';
+        if(v.approvalStatus === 'pending') return '<span class="status-pill pending"><span class="spin"></span> Pending admin review</span>';
+        if(v.active) return `<span class="status-pill verified">⭐ Standing out until ${escapeHtml(formatShortDate(v.planExpiresAt))}</span>`;
+        return '<span class="status-pill pending">Plan not active</span>';
+      })()}</div>
       <div class="field" id="venue-photos-mine-${v.id}">${venuePhotoManagerInner(v, 'mine')}</div>
       <div class="field"><label>About</label><textarea id="venue-desc-${v.id}" maxlength="500">${escapeHtml(v.description || '')}</textarea></div>
       <div class="field"><label>Street address</label><input id="venue-addr-${v.id}" type="text" value="${escapeAttr(v.address || '')}" /></div>

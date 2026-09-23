@@ -26,6 +26,7 @@ function toApiEvent(row) {
     isHidden: !!row.is_hidden,
     eventDate: row.event_date,
     paymentStatus: row.payment_status,        // 'paid' | 'unpaid' — unpaid hosted events are only visible to their host
+    approvalStatus: row.approval_status,      // 'pending' | 'approved' | 'rejected' — only 'approved' shows in Discover
     isPartner: !!row.is_partner,              // set by queries that join venues; true while the venue's plan is active
   };
 }

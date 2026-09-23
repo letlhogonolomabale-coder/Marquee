@@ -142,6 +142,7 @@ async function ensureSchema() {
       is_boosted       INTEGER NOT NULL DEFAULT 0, -- UNUSED: the boost feature was removed. Column kept so existing databases stay valid.
       boost_expires_at TEXT,                       -- UNUSED: see is_boosted.
       payment_status   TEXT NOT NULL DEFAULT 'paid', -- 'unpaid' = a host's event awaiting its R100 hosting fee (hidden from the public until paid); everything else is 'paid'
+      approval_status  TEXT NOT NULL DEFAULT 'approved', -- 'pending' = a host's event awaiting admin review; 'rejected' = admin turned it down. Only 'approved' shows in Discover. Editorial/seed/live rows default to 'approved' (never queued).
       created_at    TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE SET NULL
     );
@@ -174,6 +175,7 @@ async function ensureSchema() {
       lat             REAL,
       lng             REAL,
       plan_expires_at TEXT,                          -- ISO timestamp; NULL = never paid
+      approval_status TEXT NOT NULL DEFAULT 'approved', -- 'pending' = owner registered it, awaiting admin review; 'rejected' = admin turned it down. Only 'approved' venues are listed publicly (see GET /).
       created_at      TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (name_key, city),
       FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -271,6 +273,8 @@ async function ensureSchema() {
   if (!eventColumns.includes('boost_expires_at')) await exec('ALTER TABLE events ADD COLUMN boost_expires_at TEXT');
   // Existing rows default to 'paid' so everything already live stays live.
   if (!eventColumns.includes('payment_status')) await exec("ALTER TABLE events ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'paid'");
+  // Existing rows default to 'approved' so nothing already live gets queued retroactively.
+  if (!eventColumns.includes('approval_status')) await exec("ALTER TABLE events ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'");
 
   // Venue listing details were added after venues first shipped.
   const venueColumns = (await prepare('PRAGMA table_info(venues)').all()).map((c) => c.name);
@@ -279,6 +283,7 @@ async function ensureSchema() {
   if (!venueColumns.includes('link_url')) await exec('ALTER TABLE venues ADD COLUMN link_url TEXT');
   if (!venueColumns.includes('lat')) await exec('ALTER TABLE venues ADD COLUMN lat REAL');
   if (!venueColumns.includes('lng')) await exec('ALTER TABLE venues ADD COLUMN lng REAL');
+  if (!venueColumns.includes('approval_status')) await exec("ALTER TABLE venues ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'");
 
   const userColumns = (await prepare('PRAGMA table_info(users)').all()).map((c) => c.name);
   if (!userColumns.includes('is_admin')) await exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');

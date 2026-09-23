@@ -71,7 +71,7 @@ router.get('/', async (req, res, next) => {
         CASE WHEN v.plan_expires_at IS NOT NULL AND v.plan_expires_at >= ? THEN 1 ELSE 0 END AS is_partner
       FROM events e
       LEFT JOIN venues v ON v.name_key = lower(trim(e.venue)) AND v.city = e.city
-      WHERE e.city = ? AND e.is_hidden = 0 AND e.payment_status != 'unpaid'
+      WHERE e.city = ? AND e.is_hidden = 0 AND e.payment_status != 'unpaid' AND e.approval_status = 'approved'
         AND (e.event_date IS NULL OR e.event_date >= datetime('now'))
       ORDER BY
         e.is_main DESC,
@@ -114,7 +114,7 @@ router.get('/search', async (req, res, next) => {
         CASE WHEN v.plan_expires_at IS NOT NULL AND v.plan_expires_at >= ? THEN 1 ELSE 0 END AS is_partner
       FROM events e
       LEFT JOIN venues v ON v.name_key = lower(trim(e.venue)) AND v.city = e.city
-      WHERE e.is_hidden = 0 AND e.payment_status != 'unpaid'
+      WHERE e.is_hidden = 0 AND e.payment_status != 'unpaid' AND e.approval_status = 'approved'
         AND (e.event_date IS NULL OR e.event_date >= datetime('now'))
         AND (lower(e.title) LIKE ? ESCAPE '\\'
           OR lower(e.venue) LIKE ? ESCAPE '\\'
@@ -143,7 +143,7 @@ router.get('/past', async (req, res, next) => {
 
     const rows = await db.prepare(`
       SELECT * FROM events
-      WHERE city = ? AND is_hidden = 0 AND payment_status != 'unpaid' AND event_date IS NOT NULL AND event_date < datetime('now')
+      WHERE city = ? AND is_hidden = 0 AND payment_status != 'unpaid' AND approval_status = 'approved' AND event_date IS NOT NULL AND event_date < datetime('now')
       ORDER BY event_date DESC
     `).all(city);
 
@@ -156,7 +156,7 @@ router.get('/past', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const row = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
-    if (!row || row.payment_status === 'unpaid') return res.status(404).json({ error: 'Event not found.' });
+    if (!row || row.payment_status === 'unpaid' || row.approval_status !== 'approved') return res.status(404).json({ error: 'Event not found.' });
     res.json({ event: toApiEvent(row) });
   } catch (err) {
     next(err);
@@ -166,7 +166,11 @@ router.get('/:id', async (req, res, next) => {
 // POST /api/events — only verified hosts can post. A new event is saved as
 // 'unpaid' and stays hidden from Discover until the R100 hosting fee is paid
 // (POST /mine/:id/pay, confirmed by the webhook or /api/payments/verify).
-// Admins post for free, and so does anyone posting a Meetup.
+// Admins post for free, and so does anyone posting a Meetup. Either way, a
+// host's event also starts 'pending' and needs an admin's approval (POST
+// /admin/:id/approve or /admin/:id/reject below) before it goes live —
+// payment and approval are independent gates and Discover requires both.
+// Only admin-created posts skip the review queue entirely.
 router.post('/', requireAuth, async (req, res, next) => {
   try {
     const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
@@ -193,8 +197,8 @@ router.post('/', requireAuth, async (req, res, next) => {
 
     const result = await db
       .prepare(`
-        INSERT INTO events (host_user_id, title, venue, cat, price, date_text, event_date, description, city, lat, lng, color, source_url, payment_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO events (host_user_id, title, venue, cat, price, date_text, event_date, description, city, lat, lng, color, source_url, payment_status, approval_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         user.id,
@@ -210,11 +214,15 @@ router.post('/', requireAuth, async (req, res, next) => {
         coords?.lng ?? null,
         '#FFB454',
         url?.trim() || null,
-        (user.is_admin || cat === 'Meetup') ? 'paid' : 'unpaid'
+        (user.is_admin || cat === 'Meetup') ? 'paid' : 'unpaid',
+        user.is_admin ? 'approved' : 'pending'
       );
 
     const row = await db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ event: toApiEvent(row), requiresPayment: row.payment_status === 'unpaid', hostFeeCents: HOST_FEE_CENTS });
+    // Even a free Meetup, or an event whose fee is already paid, still
+    // waits on admin approval (see /admin/:id/approve below) before Discover
+    // shows it — the frontend surfaces this on the host's own event card.
   } catch (err) {
     next(err);
   }
@@ -365,6 +373,36 @@ router.get('/admin/all', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const rows = await db.prepare('SELECT * FROM events ORDER BY is_main DESC, created_at DESC').all();
     res.json({ events: rows.map(toApiEvent) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/events/admin/:id/approve — let a pending (or previously
+// rejected) event go live. Doesn't touch payment_status — an unpaid event
+// still needs its R100 fee paid before it actually shows in Discover; this
+// just clears the review gate.
+router.post('/admin/:id/approve', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const result = await db.prepare("UPDATE events SET approval_status = 'approved' WHERE id = ?").run(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Event not found.' });
+    const updated = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    res.json({ event: toApiEvent(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/events/admin/:id/reject — turn a listing down. It stays out of
+// Discover and off the host's own "pending" nudge disappears in favour of a
+// rejected notice; nothing is deleted, so re-approving later is possible if
+// the host fixes whatever was wrong (see PATCH /admin/:id).
+router.post('/admin/:id/reject', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const result = await db.prepare("UPDATE events SET approval_status = 'rejected' WHERE id = ?").run(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Event not found.' });
+    const updated = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    res.json({ event: toApiEvent(updated) });
   } catch (err) {
     next(err);
   }

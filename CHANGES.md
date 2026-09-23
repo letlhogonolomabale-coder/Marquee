@@ -1,27 +1,62 @@
-# Marquee update — free meetups
+# Marquee update — admin approval for listings + venue deletion
 
-Two files changed from what you uploaded. Same paths, overwrite when asked. No database changes.
+Three files changed from what you uploaded. Same paths, overwrite when asked.
+Database upgrades itself on first start (two new columns, both default to
+'approved' so nothing already live gets hidden or queued retroactively).
 
 ## What changed
-- **Meetups are free.** Posting an event with the Meetup category now goes straight to
-  "paid" — no R100 checkout, no redirect to Paystack. It appears in Discover immediately
-  (the same way an admin's post already did). Every other category still costs R100.
-- **The post form is honest about this before you submit.** Meetup is now the first/default
-  option in the category dropdown. The button reads "Post meetup — free" for Meetup and
-  "Post event — R100" for everything else, and the hint text above it updates to match as
-  you change the category. Meetup was already a category option before this change — the
-  form just didn't make the price difference clear, which is what this fixes.
+
+**Every new listing needs admin sign-off before it goes live.**
+- A host's event — paid, free Meetup, doesn't matter — now starts
+  `approval_status: 'pending'`. Discover requires BOTH the hosting fee paid
+  (or it's a free Meetup) AND admin approval; whichever is still missing is
+  what keeps it hidden. Only admin-posted events skip the queue.
+- A venue registration (Bars & Lounges / Fine Dining) works the same way:
+  paying the R50 plan is no longer enough on its own — an admin has to
+  approve it too before it appears on the public tab.
+- Rejecting doesn't delete anything — a rejected item just stays out of
+  Discover/the tabs, and can be approved later if the host fixes whatever
+  was wrong. The host/owner sees their own item's status either way
+  (Pending review / Rejected / Live), on their own profile page.
+- Admin panel: both the Events and Venues tabs now show a status badge and
+  Approve/Reject buttons on every row.
+
+**Admin can now delete a venue listing entirely** (Venues tab → "Delete
+venue", with a confirm prompt — this can't be undone, unlike Reject). Its
+photos are removed too. Events already posted at that venue are untouched —
+they just stop getting the gold partner highlight, since that's a live name
+match, not something tied to the venue row.
 
 ## Files
-Edited: backend/src/routes/events.js (one line: Meetups save as 'paid', same as admin posts),
-frontend/Marquee.html (post-form category order + dynamic fee hint/button),
-frontend/sw.js (cache bumped to v14, so the updated form reaches people who already
-installed the app).
+Edited: backend/src/db.js (two new columns: events.approval_status,
+venues.approval_status), backend/src/routes/events.js (approval gate +
+POST /admin/:id/approve, /admin/:id/reject), backend/src/routes/venues.js
+(approval gate + the same two admin routes, plus DELETE /admin/:id),
+backend/src/utils/serializeEvent.js (approvalStatus field), frontend/Marquee.html
+(status pills on the host/owner side; badges, Approve/Reject and Delete
+venue on the admin side), frontend/sw.js (cache bumped to v16).
 
 ## Tested
-58 automated checks against the real route code and a real database (including two new
-checks: a Meetup is created already paid and appears in Discover with no payment step, while
-a non-Meetup still requires the R100 fee) — all passing. 8 browser checks in headless Chromium
-confirming the form defaults to Meetup, the button/hint text switch correctly when the category
-changes, and submitting a Meetup never triggers a checkout redirect — all passing.
-Not tested: live Paystack, your real database.
+90 automated checks against the real route code and a real database — new
+listings start pending, stay hidden from Discover/search/direct-link/the
+public tabs until approved, a rejected one can be re-approved later, admins
+skip the queue, deleting a venue removes it (and 404s on a repeat or unknown
+id) without touching events at that venue — all passing (2 unrelated,
+pre-existing environment quirks in this test setup, not caused by this
+change: no seed "main event" and no paid Durban event exist in the bare test
+database this runs against). 12 browser checks in headless Chromium: the
+Admin tab, approve/reject buttons and badges on both Events and Venues rows,
+the delete-with-confirm flow (including cancelling it), and no JS errors —
+all passing.
+Not tested: live Paystack, your real database, or a genuinely large backlog
+of pending listings (pagination isn't part of this change).
+
+## Decisions you may want to revisit
+- I read "any listing" as events AND venues. If you only meant one of them,
+  say so and I'll narrow it.
+- I made this admin-only (matching how the rest of the admin panel works) —
+  there's no owner-side delete for their own venue. Say the word if hosts/
+  owners should be able to remove their own listings too.
+- A rejected event/venue currently gives the host/owner no reason why and no
+  way to edit and resubmit from their side — just a "contact support" style
+  notice. I can add an admin note + an edit-and-resubmit flow if useful.
