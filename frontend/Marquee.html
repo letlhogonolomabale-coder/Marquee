@@ -229,6 +229,21 @@
   .navtabs button.active{background:var(--surface-raised);color:var(--text);}
   .admin-only-tab{display:none;}
   body.is-admin .admin-only-tab{display:block;}
+  .bell-btn{
+    position:relative;flex-shrink:0;display:none;
+    background:var(--surface-raised);border:1px solid var(--line);color:var(--muted);
+    width:32px;height:32px;border-radius:9px;cursor:pointer;
+    align-items:center;justify-content:center;font-size:15px;margin-left:8px;
+  }
+  .bell-badge{
+    position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 3px;
+    background:var(--danger);color:#fff;font-size:10px;font-weight:700;line-height:16px;
+    border-radius:8px;text-align:center;display:none;
+  }
+  .notif-row{padding:12px 0;border-bottom:1px solid var(--line-soft);}
+  .notif-row:last-child{border-bottom:none;}
+  .notif-row p{font-size:13.5px;color:var(--text);line-height:1.5;margin-bottom:4px;}
+  .notif-row span{font-size:11.5px;color:var(--muted);}
 
   /* Once a 4th tab (Admin) is showing, there isn't room for both the full
      wordmark and four tabs on a phone-width screen — drop to just the icon
@@ -911,6 +926,9 @@
       <button id="tab-host" onclick="showPage('host')">Account</button>
       <button id="tab-admin" class="admin-only-tab" onclick="showPage('admin')">Admin</button>
     </div>
+    <button class="bell-btn" id="bell-btn" onclick="openNotifications()" aria-label="Notifications">
+      🔔<span class="bell-badge" id="bell-badge"></span>
+    </button>
   </div>
 
   <!-- ---- ADMIN PAGE (hidden unless currentUser.isAdmin) ---- -->
@@ -1218,6 +1236,8 @@ function setAuth(token, user){
   currentUser = user;
   if(token) localStorage.setItem('marquee_token', token);
   else localStorage.removeItem('marquee_token');
+  updateNotificationBellVisibility();
+  if(token) refreshNotifications(); else notifState = { broadcasts: [], unreadBroadcasts: 0, pendingCount: 0, badgeCount: 0 };
 }
 
 function logout(rerender = true){
@@ -1249,6 +1269,97 @@ async function bootstrapSession(){
     console.warn('Session restore failed:', err.message);
   }
   updateAdminTabVisibility();
+  updateNotificationBellVisibility();
+  refreshNotifications();
+}
+
+// ================= notification bell =================
+// Broadcasts (admin announcements) plus, for admins only, a live count of
+// listings waiting on approval — see routes/notifications.js.
+let notifState = { broadcasts: [], unreadBroadcasts: 0, pendingCount: 0, badgeCount: 0 };
+let notifPollStarted = false;
+
+function updateNotificationBellVisibility(){
+  const btn = document.getElementById('bell-btn');
+  if(btn) btn.style.display = authToken ? 'flex' : 'none';
+  if(authToken && !notifPollStarted){
+    notifPollStarted = true;
+    // A light poll so the badge stays current without the person having to
+    // reopen the app — 60s is frequent enough to feel live, cheap enough
+    // not to matter.
+    setInterval(() => { if(authToken) refreshNotifications(); }, 60000);
+  }
+}
+
+async function refreshNotifications(){
+  if(!authToken) return;
+  try{
+    notifState = await apiFetch('/api/notifications');
+    renderBellBadge();
+  } catch(err){
+    console.warn('Could not load notifications:', err.message);
+  }
+}
+
+function renderBellBadge(){
+  const b = document.getElementById('bell-badge');
+  if(!b) return;
+  const n = notifState.badgeCount || 0;
+  b.textContent = n > 9 ? '9+' : String(n);
+  b.style.display = n > 0 ? 'flex' : 'none';
+}
+
+// Roughly how long ago, in the fewest words that stay honest — "just now",
+// "12m ago", "3h ago", then falls back to a short date once it's old enough
+// that a relative count stops being useful.
+function timeAgo(iso){
+  if(!iso) return '';
+  const then = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
+  const mins = Math.floor((Date.now() - then.getTime()) / 60000);
+  if(mins < 1) return 'just now';
+  if(mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if(hrs < 24) return hrs + 'h ago';
+  return formatShortDate(iso);
+}
+
+function openNotifications(){
+  renderNotificationsSheet();
+  document.getElementById('overlay').classList.add('open');
+  // Marks broadcasts read; pendingCount is untouched — that only drops as
+  // an admin actually approves/rejects the listings behind it.
+  apiFetch('/api/notifications/seen', { method: 'POST' })
+    .then(() => {
+      notifState.unreadBroadcasts = 0;
+      notifState.badgeCount = notifState.pendingCount;
+      renderBellBadge();
+    })
+    .catch(() => {});
+}
+
+function renderNotificationsSheet(){
+  const pendingRow = (currentUser?.isAdmin && notifState.pendingCount > 0)
+    ? `<div class="notif-row">
+        <p>🕓 <b>${notifState.pendingCount}</b> listing${notifState.pendingCount === 1 ? '' : 's'} waiting on your review</p>
+        <span class="link-btn" style="display:inline-block;cursor:pointer" onclick="closeSheet(); showPage('admin');">Review now →</span>
+      </div>`
+    : '';
+  const broadcastRows = notifState.broadcasts.length
+    ? notifState.broadcasts.map(b => `
+      <div class="notif-row">
+        <p>📣 ${escapeHtml(b.message)}</p>
+        <span>${timeAgo(b.createdAt)}</span>
+      </div>`).join('')
+    : '<p class="hint">No announcements yet.</p>';
+
+  document.getElementById('sheet-content').innerHTML = `
+    <div class="sheet-head">
+      <h3>Notifications</h3>
+      <button class="sheet-close" onclick="closeSheet()">×</button>
+    </div>
+    ${pendingRow}
+    ${broadcastRows}
+  `;
 }
 
 function updateAdminTabVisibility(){
@@ -2014,7 +2125,8 @@ function submitPastComment(idx){
 let hostState = { mode: 'signup', view: 'profile' }; // mode: 'signup'|'login' (pre-login). view: 'profile'|'apply'|'post'|'venue' (post-login)
 let myHostedEvents = [];
 let myVenues = [];
-let adminVenues = [];              // every venue, for the admin Venues tab
+let adminVenues = [];
+let adminBroadcasts = [];              // every broadcast ever sent, for the admin Broadcasts tab
 let pendingEventPhoto = null;      // { blob, url } chosen in the "Post an event" form, uploaded right after the event is created
 let pendingVenuePhotos = [];       // [{ blob, url }] chosen in the "Add your venue" form
 
@@ -2372,7 +2484,7 @@ async function handleIdUpload(evt){
 let adminEvents = [];
 let adminEventSearch = '';
 let adminUsers = [];
-let adminView = 'events'; // 'events' | 'venues' | 'users' | 'blog'
+let adminView = 'events'; // 'events' | 'venues' | 'users' | 'blog' | 'broadcasts'
 
 function renderAdmin(){
   const c = document.getElementById('admin-content');
@@ -2382,13 +2494,71 @@ function renderAdmin(){
       <button class="${adminView === 'venues' ? 'active' : ''}" onclick="adminView='venues'; renderAdmin();">Venues</button>
       <button class="${adminView === 'users' ? 'active' : ''}" onclick="adminView='users'; renderAdmin();">Users</button>
       <button class="${adminView === 'blog' ? 'active' : ''}" onclick="adminView='blog'; renderAdmin();">Blog</button>
+      <button class="${adminView === 'broadcasts' ? 'active' : ''}" onclick="adminView='broadcasts'; renderAdmin();">Broadcasts</button>
     </div>
     <div id="admin-subcontent"><p class="hint">Loading…</p></div>
   `;
   if(adminView === 'events') renderAdminEvents();
   else if(adminView === 'venues') renderAdminVenues();
   else if(adminView === 'users') renderAdminUsers();
+  else if(adminView === 'broadcasts') renderAdminBroadcasts();
   else renderAdminBlog();
+}
+
+// ================= admin: broadcasts =================
+async function renderAdminBroadcasts(){
+  const c = document.getElementById('admin-subcontent');
+  c.innerHTML = `
+    <p class="hint" style="margin-bottom:12px">Sent to every user's notification bell — keep it short.</p>
+    <div class="field"><textarea id="broadcast-message" maxlength="500" placeholder="e.g. Marquee now covers Cape Town — check Discover!"></textarea></div>
+    <button class="primary-btn" onclick="sendBroadcast()">Send to everyone</button>
+    <div id="broadcast-history" style="margin-top:18px"><p class="hint">Loading…</p></div>
+  `;
+  try{
+    const { broadcasts } = await apiFetch('/api/notifications/admin/all');
+    adminBroadcasts = broadcasts;
+    renderAdminBroadcastRows();
+  } catch(err){
+    document.getElementById('broadcast-history').innerHTML = `<p class="hint">Couldn't load history — ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderAdminBroadcastRows(){
+  const el = document.getElementById('broadcast-history');
+  if(!el) return;
+  el.innerHTML = adminBroadcasts.length
+    ? adminBroadcasts.map(b => `
+      <div class="host-hero" style="margin-bottom:10px">
+        <p>${escapeHtml(b.message)}</p>
+        <span class="hint">${escapeHtml(timeAgo(b.createdAt))}</span>
+        <button class="link-btn" style="display:block;margin-top:8px;color:var(--danger)" onclick="adminDeleteBroadcast(${b.id})">Delete</button>
+      </div>`).join('')
+    : '<p class="hint">No broadcasts sent yet.</p>';
+}
+
+async function sendBroadcast(){
+  const message = document.getElementById('broadcast-message').value.trim();
+  if(message.length < 3){ showToast('Write a bit more', 'Broadcasts need at least a few characters.'); return; }
+  try{
+    const { broadcast } = await apiFetch('/api/notifications/broadcast', { method: 'POST', body: JSON.stringify({ message }) });
+    adminBroadcasts.unshift(broadcast);
+    renderAdminBroadcastRows();
+    document.getElementById('broadcast-message').value = '';
+    showToast('Sent', 'Everyone will see it in their notification bell.');
+  } catch(err){
+    showToast("Couldn't send", err.message);
+  }
+}
+
+async function adminDeleteBroadcast(id){
+  if(!confirm('Delete this broadcast? It disappears from everyone\'s bell history.')) return;
+  try{
+    await apiFetch('/api/notifications/admin/' + id, { method: 'DELETE' });
+    adminBroadcasts = adminBroadcasts.filter(b => b.id !== id);
+    renderAdminBroadcastRows();
+  } catch(err){
+    showToast("Couldn't delete", err.message);
+  }
 }
 
 async function renderAdminEvents(){

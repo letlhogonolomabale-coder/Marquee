@@ -1,62 +1,47 @@
-# Marquee update — admin approval for listings + venue deletion
+# Marquee update — notification bell + admin broadcasts
 
-Three files changed from what you uploaded. Same paths, overwrite when asked.
-Database upgrades itself on first start (two new columns, both default to
-'approved' so nothing already live gets hidden or queued retroactively).
+Five files, same paths — overwrite when asked. Database upgrades itself on
+first start (a `broadcasts` table, and a `notifications_seen_at` column on
+users; both harmless additions, nothing existing is touched).
 
-## What changed
+## What it does
 
-**Every new listing needs admin sign-off before it goes live.**
-- A host's event — paid, free Meetup, doesn't matter — now starts
-  `approval_status: 'pending'`. Discover requires BOTH the hosting fee paid
-  (or it's a free Meetup) AND admin approval; whichever is still missing is
-  what keeps it hidden. Only admin-posted events skip the queue.
-- A venue registration (Bars & Lounges / Fine Dining) works the same way:
-  paying the R50 plan is no longer enough on its own — an admin has to
-  approve it too before it appears on the public tab.
-- Rejecting doesn't delete anything — a rejected item just stays out of
-  Discover/the tabs, and can be approved later if the host fixes whatever
-  was wrong. The host/owner sees their own item's status either way
-  (Pending review / Rejected / Live), on their own profile page.
-- Admin panel: both the Events and Venues tabs now show a status badge and
-  Approve/Reject buttons on every row.
+**The bell (top-right, next to Admin), for every logged-in user:**
+- A badge shows how many things are new: unread admin broadcasts, plus —
+  for admins only — how many events/venues are waiting on approval right
+  now. Refreshes on load and every 60 seconds.
+- Tapping it opens a panel: admins see a "N listings waiting on your
+  review" row with a link straight into the Admin panel, then every
+  broadcast (newest first) with a relative time ("18h ago"). Opening it
+  marks broadcasts as read — the pending-review count only drops when an
+  admin actually approves or rejects those listings.
 
-**Admin can now delete a venue listing entirely** (Venues tab → "Delete
-venue", with a confirm prompt — this can't be undone, unlike Reject). Its
-photos are removed too. Events already posted at that venue are untouched —
-they just stop getting the gold partner highlight, since that's a live name
-match, not something tied to the venue row.
+**Admin → Broadcasts (new tab, alongside Events/Venues/Users/Blog):**
+compose a short message and send it to every user's bell, see the full
+send history, delete one you sent by mistake.
 
 ## Files
-Edited: backend/src/db.js (two new columns: events.approval_status,
-venues.approval_status), backend/src/routes/events.js (approval gate +
-POST /admin/:id/approve, /admin/:id/reject), backend/src/routes/venues.js
-(approval gate + the same two admin routes, plus DELETE /admin/:id),
-backend/src/utils/serializeEvent.js (approvalStatus field), frontend/Marquee.html
-(status pills on the host/owner side; badges, Approve/Reject and Delete
-venue on the admin side), frontend/sw.js (cache bumped to v16).
+db.js (`broadcasts` table + `users.notifications_seen_at`), server.js
+(mounts the new route), routes/notifications.js (GET /, POST /seen, POST
+/broadcast, GET /admin/all, DELETE /admin/:id — all admin-only except the
+first two), Marquee.html (bell button + badge + panel + the admin
+Broadcasts tab), sw.js (cache bumped to v17).
 
 ## Tested
-90 automated checks against the real route code and a real database — new
-listings start pending, stay hidden from Discover/search/direct-link/the
-public tabs until approved, a rejected one can be re-approved later, admins
-skip the queue, deleting a venue removes it (and 404s on a repeat or unknown
-id) without touching events at that venue — all passing (2 unrelated,
-pre-existing environment quirks in this test setup, not caused by this
-change: no seed "main event" and no paid Durban event exist in the bare test
-database this runs against). 12 browser checks in headless Chromium: the
-Admin tab, approve/reject buttons and badges on both Events and Venues rows,
-the delete-with-confirm flow (including cancelling it), and no JS errors —
-all passing.
-Not tested: live Paystack, your real database, or a genuinely large backlog
-of pending listings (pagination isn't part of this change).
+18 backend checks against the real route code and a real database — badge
+counts (unread broadcasts + pending listings, folded together correctly),
+opening the bell marking broadcasts read without touching the pending
+count, the admin-only gate on sending/deleting broadcasts (a non-admin
+gets a real 403), history and deletion — all passing. 15 browser checks in
+headless Chromium — the badge count, the panel's content and read-marking,
+"Review now" jumping into Admin, composing/sending/deleting a broadcast
+from the admin tab, and no JS errors — all passing.
+Not tested: live Paystack (unaffected by this change anyway), your real
+database, or a very large broadcast history (no pagination yet — the bell
+only ever shows the most recent 20).
 
-## Decisions you may want to revisit
-- I read "any listing" as events AND venues. If you only meant one of them,
-  say so and I'll narrow it.
-- I made this admin-only (matching how the rest of the admin panel works) —
-  there's no owner-side delete for their own venue. Say the word if hosts/
-  owners should be able to remove their own listings too.
-- A rejected event/venue currently gives the host/owner no reason why and no
-  way to edit and resubmit from their side — just a "contact support" style
-  notice. I can add an admin note + an edit-and-resubmit flow if useful.
+## Worth knowing
+- There's no way to target a broadcast at just hosts, or just one city —
+  every broadcast goes to every user. Say the word if you want targeting.
+- Pending-listing count is a live query (not a stored notification), so it
+  can never go stale or need clearing beyond actually reviewing the item.

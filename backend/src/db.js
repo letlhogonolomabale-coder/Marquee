@@ -201,6 +201,23 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_images_venue ON images(venue_id, position);
     CREATE INDEX IF NOT EXISTS idx_images_uploader ON images(uploader_id);
 
+    -- An admin's announcement to every user (e.g. "we've launched Cape
+    -- Town!"). Shown to everyone in the notification bell — see
+    -- routes/notifications.js. created_by is nullable (ON DELETE SET NULL)
+    -- so deleting the admin's account later doesn't delete their broadcasts.
+    CREATE TABLE IF NOT EXISTS broadcasts (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      message     TEXT NOT NULL,
+      created_by  INTEGER,
+      -- Millisecond precision (unlike the rest of the app's second-precision
+      -- timestamps) because this gets string-compared against
+      -- users.notifications_seen_at to work out what's unread — two
+      -- broadcasts sent in the same second is plausible; the same
+      -- millisecond isn't.
+      created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     -- One row per Paystack transaction we've acted on. The reference is the
     -- primary key, so the webhook and the browser-return check can both run
     -- for the same payment without applying it twice.
@@ -286,6 +303,10 @@ async function ensureSchema() {
   if (!venueColumns.includes('approval_status')) await exec("ALTER TABLE venues ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'");
 
   const userColumns = (await prepare('PRAGMA table_info(users)').all()).map((c) => c.name);
+  // How far into the broadcast history this user has already seen — see
+  // routes/notifications.js. NULL means "never opened the bell", so every
+  // existing broadcast counts as unread the first time they do.
+  if (!userColumns.includes('notifications_seen_at')) await exec('ALTER TABLE users ADD COLUMN notifications_seen_at TEXT');
   if (!userColumns.includes('is_admin')) await exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
   if (!userColumns.includes('host_org_name')) await exec('ALTER TABLE users ADD COLUMN host_org_name TEXT');
   if (!userColumns.includes('host_phone')) await exec('ALTER TABLE users ADD COLUMN host_phone TEXT');
