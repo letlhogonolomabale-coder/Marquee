@@ -245,13 +245,16 @@
   .notif-row p{font-size:13.5px;color:var(--text);line-height:1.5;margin-bottom:4px;}
   .notif-row span{font-size:11.5px;color:var(--muted);}
 
-  /* Once a 4th tab (Admin) is showing, there isn't room for both the full
-     wordmark and four tabs on a phone-width screen — drop to just the icon
-     so the logo still gets breathing room instead of being crushed. Toggled
-     by the 'is-admin' class on <body> (see updateAdminTabVisibility). */
-  @media (max-width: 430px){
-    body.is-admin .topbar-brand span{ display:none; }
-    body.is-admin .navtabs button{ padding:7px 9px; font-size:11.5px; }
+  /* Phones: logo and bell share the top row, and the tabs get their own
+     full-width row underneath (equal-width, so 3 or 4 tabs both fit) — the
+     tabs no longer squeeze up against the Marquee wordmark. */
+  .topbar{gap:0 8px;}
+  @media (max-width: 520px){
+    .topbar{flex-wrap:wrap;row-gap:10px;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));}
+    .topbar-brand{order:1;margin-right:auto;}
+    .bell-btn{order:2;margin-left:0;}
+    .topbar .navtabs{order:3;flex:0 0 100%;width:100%;}
+    .topbar .navtabs button{flex:1 1 0;padding:8px 6px;font-size:12.5px;}
   }
 
   .page{max-width:640px;margin:0 auto;padding:22px 18px;display:none;}
